@@ -15,7 +15,7 @@ export default function CommentItem({ comment, diaryId, onDelete }: CommentItemP
 
   useEffect(() => {
     if (!isMenuOpen) return;
-    const handleClickOutside = () => {
+    const handleClickOutside = (event: MouseEvent) => {
       setIsMenuOpen(false);
     };
     document.addEventListener('click', handleClickOutside);

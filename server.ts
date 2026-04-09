@@ -32,6 +32,7 @@ async function startServer() {
   // Helper to send standardized error responses
   const sendError = (res: express.Response, error: any, defaultMessage: string) => {
     const status = error.response?.status || 500;
+    const isProduction = process.env.NODE_ENV === 'production';
     const errorData = error.response?.data;
     
     // Check for specific Volcengine error codes
@@ -39,14 +40,14 @@ async function startServer() {
     const errorMessage = errorData?.error?.message || errorData?.message || error.message;
 
     if (errorCode === "AccountBalanceInsufficient" || errorMessage?.toLowerCase().includes("balance")) {
-      return res.status(403).json({
+      return res.status(403).json({ 
         error: "账户余额不足，请联系管理员充值",
         code: "BALANCE_INSUFFICIENT"
       });
     }
 
     if (errorCode === "QuotaExceeded" || errorMessage?.toLowerCase().includes("quota")) {
-      return res.status(403).json({
+      return res.status(403).json({ 
         error: "API 额度已耗尽，请检查资源包状态",
         code: "QUOTA_EXCEEDED"
       });
@@ -66,9 +67,10 @@ async function startServer() {
       });
     }
 
-    res.status(status).json({
+    res.status(status).json({ 
       error: defaultMessage,
       message: errorMessage
+      // detail 字段已移除：生产环境不返回上游错误原始数据
     });
   };
 
@@ -76,6 +78,7 @@ async function startServer() {
   app.post("/api/generate-image", async (req, res) => {
     const { prompt } = req.body;
 
+    // 恢复前置校验，防止空指针
     if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: "缺少必要参数: prompt", code: "INVALID_PARAMETER" });
     }
@@ -125,10 +128,11 @@ async function startServer() {
   const isValidTaskId = (id: string) => {
     if (id.startsWith('url:')) {
       const url = id.substring(4);
-      // 仅允许 HTTPS URL，防止 SSRF 和反射型 XSS
+      // 仅允许 HTTPS URL，且必须以 https:// 开头
       if (!/^https:\/\/[a-zA-Z0-9]/.test(url)) return false;
       return true;
     }
+    // 修复正则漏洞：支持下划线并严格限制 128 位长度
     return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
   };
 
@@ -163,6 +167,7 @@ async function startServer() {
   app.post("/api/generate-video", async (req, res) => {
     const { prompt, negative_prompt, image_base64, parameters } = req.body;
 
+    // 恢复 image_base64 非空校验
     if (!image_base64) {
       return res.status(400).json({ error: "缺少必要参数: image_base64", code: "INVALID_PARAMETER" });
     }

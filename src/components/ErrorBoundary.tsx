@@ -1,50 +1,88 @@
-import React from 'react';
+import React from "react";
+import { AlertCircle, RefreshCw, Home } from "lucide-react";
+
+interface Props {
+  children: React.ReactNode;
+}
 
 interface State {
   hasError: boolean;
   error: Error | null;
 }
 
-export default class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  State
-> {
-  state: State = { hasError: false, error: null };
+class ErrorBoundary extends (React.Component as any) {
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
 
-  static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info.componentStack);
+  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
   }
 
-  handleReset = () => {
+  private handleReset = () => {
     this.setState({ hasError: false, error: null });
+    window.location.href = "/";
   };
 
-  render() {
-    if (this.state.hasError) {
+  private handleReload = () => {
+    window.location.reload();
+  };
+
+  public render() {
+    const { hasError, error } = this.state as State;
+    if (hasError) {
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-6">
-          <div className="text-center max-w-xs">
-            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-              <span className="text-3xl">😿</span>
+        <div className="min-h-screen bg-[#FDF8F6] flex items-center justify-center p-6">
+          <div className="w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-xl border-2 border-orange-100 text-center">
+            <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="w-10 h-10 text-orange-500" />
             </div>
-            <h2 className="text-xl font-black text-on-surface mb-2">哎呀，出错了</h2>
-            <p className="text-sm text-on-surface-variant mb-6">
-              页面遇到了一些问题，请尝试刷新。
+            
+            <h1 className="text-2xl font-black text-gray-900 mb-3">哎呀，出错了</h1>
+            <p className="text-gray-500 mb-8 leading-relaxed">
+              猫咪可能在玩耍时不小心碰断了线，或者发生了一些意料之外的情况。
             </p>
-            <button
-              onClick={this.handleReset}
-              className="px-8 py-3 bg-primary text-white rounded-full font-bold shadow-lg active:scale-95 transition-transform"
-            >
-              重试
-            </button>
+
+            {import.meta.env.DEV && (
+              <div className="mb-8 p-4 bg-red-50 rounded-2xl text-left overflow-auto max-h-40">
+                <p className="text-xs font-mono text-red-600 whitespace-pre-wrap">
+                  {error?.stack}
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={this.handleReload}
+                className="w-full py-4 bg-[#FF9D76] text-white rounded-2xl font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 active:scale-95 transition-transform"
+              >
+                <RefreshCw size={20} />
+                重试一下
+              </button>
+              
+              <button
+                onClick={this.handleReset}
+                className="w-full py-4 bg-gray-50 text-gray-600 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+              >
+                <Home size={20} />
+                返回首页
+              </button>
+            </div>
           </div>
         </div>
       );
     }
-    return this.props.children;
+
+    return (this.props as Props).children;
   }
 }
+
+export default ErrorBoundary;

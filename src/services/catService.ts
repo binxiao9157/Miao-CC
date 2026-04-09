@@ -61,6 +61,7 @@ export const catService = {
       if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
         sharedAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
+      // 如果被浏览器挂起，尝试恢复
       if (sharedAudioCtx.state === 'suspended') {
         sharedAudioCtx.resume();
       }

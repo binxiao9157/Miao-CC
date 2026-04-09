@@ -5,6 +5,7 @@ interface AuthContextType {
   user: UserInfo | null;
   isAuthenticated: boolean;
   hasCat: boolean;
+  catCount: number;
   login: (username: string, password: string) => boolean;
   register: (info: UserInfo) => void;
   logout: () => void;
@@ -26,27 +27,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
-    // 尝试从 localStorage 恢复用户会话，而非清除
+    // 尝试从 localStorage 恢复用户会话，并检查 5 分钟免登录有效期
     const savedUser = storage.getUserInfo();
-    if (savedUser && storage.getToken()) {
+    const token = storage.getToken();
+    const lastActiveTime = storage.getLastActiveTime();
+    const currentTime = Date.now();
+    const threshold = 5 * 60 * 1000; // 5 分钟测试阈值
+
+    if (savedUser && token && lastActiveTime && (currentTime - lastActiveTime <= threshold)) {
+      // 在有效期内，恢复会话并更新活跃时间戳（滑动窗口）
       setUser(savedUser);
       setIsAuthenticated(true);
+      storage.saveLastActiveTime(currentTime);
       refreshCatStatus();
     } else {
-      // 无有效会话时才清除残留数据
+      // 超过 5 分钟或无会话数据，强制登出
       storage.clearCurrentUser();
       refreshCatStatus();
     }
-  }, []);
+  }, [refreshCatStatus]);
 
   const login = (username: string, password: string): boolean => {
     const users = storage.getAllUsers();
     const savedUser = users.find(u => u.username === username && u.password === password);
     
     if (savedUser) {
-      // 1. 设置当前用户（这会改变 storage 的 getUserKey 行为）
+      // 1. 设置当前用户
       storage.saveUserInfo(savedUser);
       storage.saveToken('mock_token_' + Date.now());
+      storage.saveLoginTime(Date.now()); // 记录登录时间
+      storage.saveLastActiveTime(Date.now()); // 记录最后活跃时间
       
       // 2. 更新内存状态
       setIsAuthenticated(true);
@@ -94,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, hasCat, login, register, logout, updateProfile, refreshCatStatus }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, hasCat, catCount, login, register, logout, updateProfile, refreshCatStatus }}>
       {children}
     </AuthContext.Provider>
   );

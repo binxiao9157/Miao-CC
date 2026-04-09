@@ -14,6 +14,7 @@ export default function GenerationProgress() {
   const navigate = useNavigate();
   // 管理 I2V 阶段的 AbortController 生命周期
   const i2vAbortRef = useRef<AbortController | null>(null);
+
   const { refreshCatStatus } = useAuthContext();
   const { image, name, breed, furColor, isRedemption, isDebugRedemption, redemptionAmount } = location.state || {};
 
@@ -52,7 +53,7 @@ export default function GenerationProgress() {
           throw new Error(`积分不足，需要 ${required} 积分，当前仅有 ${currentPoints.total} 积分`);
         }
       }
-
+      
       // 优化：在提交 I2V 之前，如果图片是 base64 且尺寸过大，进行压缩
       // 这可以有效防止 "timeout of 150000ms exceeded" 错误
       let optimizedImg = img;
@@ -155,7 +156,7 @@ export default function GenerationProgress() {
       setProgress(100);
       setPhase('success');
       
-      // 扣除积分（已在生成前预检查过）
+      // 扣除积分 (已在前面预检查过)
       if (isRedemption && !isDebugRedemption) {
         storage.deductPoints(redemptionAmount || 200, "解锁新伙伴");
       }
@@ -352,7 +353,7 @@ export default function GenerationProgress() {
               我们已经成功构思出了小猫的形象。接下来，AI 将以此为基准，为你绘制 4 段生动的互动视频。
             </p>
 
-            <button
+            <button 
               onClick={() => {
                 const controller = new AbortController();
                 i2vAbortRef.current = controller;

@@ -288,20 +288,21 @@ export class VolcanoService {
       if (onProgress) onProgress(status);
 
       if (status === 'succeeded') {
-        let videoUrl =
-          result.output?.video_url ||
-          result.content?.video_url ||
+        let videoUrl = 
+          result.output?.video_url || 
+          result.content?.video_url || 
           result.data?.video_url ||
           result.video_url;
 
         if (!videoUrl && result.response?.video?.uri) {
           videoUrl = result.response.video.uri;
         }
-
+        
         if (videoUrl && (videoUrl.startsWith('http') || videoUrl.startsWith('/api'))) {
           return videoUrl;
+        } else {
+          throw new Error(`任务成功但未获取到有效的视频播放地址。`);
         }
-        throw new Error("任务成功但未获取到有效的视频播放地址。");
       } else if (status === 'failed' || status === 'cancelled') {
         throw new Error(`任务失败，状态: ${status}, 错误: ${JSON.stringify(result.error || result.message)}`);
       }

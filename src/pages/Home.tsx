@@ -69,7 +69,7 @@ export default function Home() {
     }, duration);
   };
 
-  const startGreetingTimer = () => {
+  const startGreetingTimer = useCallback(() => {
     const settings = storage.getSettings();
     if (settings.greetingsEnabled) {
       const hour = new Date().getHours();
@@ -84,7 +84,7 @@ export default function Home() {
         showFloatingBubble(text);
       }
     }
-  };
+  }, [bubbleText]);
 
   useEffect(() => {
     const refreshCat = () => {
@@ -164,7 +164,7 @@ export default function Home() {
       if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
     };
-  }, []);
+  }, [startGreetingTimer]);
 
   useEffect(() => {
     if (interactionBubble) {
@@ -256,7 +256,7 @@ export default function Home() {
   const triggerInteraction = (actionName: string, bubbleText: string, actionKey?: string) => {
     showFloatingBubble(bubbleText);
     handleInteraction(actionName);
-
+    
     const hasMultiVideo = cat?.videoPaths && actionKey && cat.videoPaths[actionKey as keyof typeof cat.videoPaths];
 
     if (hasMultiVideo && actionKey && actionRefs[actionKey]?.current) {
