@@ -39,41 +39,36 @@ async function startServer() {
     const errorMessage = errorData?.error?.message || errorData?.message || error.message;
 
     if (errorCode === "AccountBalanceInsufficient" || errorMessage?.toLowerCase().includes("balance")) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: "账户余额不足，请联系管理员充值",
-        code: "BALANCE_INSUFFICIENT",
-        detail: errorData
+        code: "BALANCE_INSUFFICIENT"
       });
     }
 
     if (errorCode === "QuotaExceeded" || errorMessage?.toLowerCase().includes("quota")) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: "API 额度已耗尽，请检查资源包状态",
-        code: "QUOTA_EXCEEDED",
-        detail: errorData
+        code: "QUOTA_EXCEEDED"
       });
     }
 
     if (errorCode === "InvalidParameter") {
       return res.status(400).json({
         error: `参数错误: ${errorMessage}`,
-        code: "INVALID_PARAMETER",
-        detail: errorData
+        code: "INVALID_PARAMETER"
       });
     }
 
     if (status === 404) {
       return res.status(404).json({
         error: "API 端点未找到 (404)。请检查推理接入点 ID 是否正确。",
-        code: "NOT_FOUND",
-        detail: errorData || errorMessage
+        code: "NOT_FOUND"
       });
     }
 
-    res.status(status).json({ 
+    res.status(status).json({
       error: defaultMessage,
-      message: errorMessage,
-      detail: errorData
+      message: errorMessage
     });
   };
 
@@ -128,7 +123,12 @@ async function startServer() {
 
   // SSRF Protection: Validate taskId format
   const isValidTaskId = (id: string) => {
-    if (id.startsWith('url:')) return true;
+    if (id.startsWith('url:')) {
+      const url = id.substring(4);
+      // 仅允许 HTTPS URL，防止 SSRF 和反射型 XSS
+      if (!/^https:\/\/[a-zA-Z0-9]/.test(url)) return false;
+      return true;
+    }
     return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
   };
 
@@ -306,6 +306,7 @@ async function startServer() {
 
   process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
+    process.exit(1);
   });
 }
 

@@ -443,7 +443,7 @@ export const storage = {
     if (!p.history) p.history = [];
 
     // Self-healing
-    const today = new Date().toLocaleDateString();
+    const today = new Date().toISOString().slice(0, 10);
     let expectedMinimum = 0;
     if (p.lastLoginDate === today) expectedMinimum += 10;
     if (p.lastInteractionDate === today) expectedMinimum += p.dailyInteractionPoints;

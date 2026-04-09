@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, TouchEvent, RefObject } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, TouchEvent, RefObject } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Coins, RefreshCw, Loader2, AlertCircle, Settings } from "lucide-react";
 import { storage, CatInfo } from "../services/storage";
@@ -98,7 +98,7 @@ export default function Home() {
     refreshCat();
 
     const pointsInfo = storage.getPoints();
-    const today = new Date().toLocaleDateString();
+    const today = new Date().toISOString().slice(0, 10);
     
     if (pointsInfo.lastLoginDate !== today) {
       pointsInfo.total += 10;
@@ -229,7 +229,7 @@ export default function Home() {
 
   const handleInteraction = (actionName: string) => {
     const p = storage.getPoints();
-    const today = new Date().toLocaleDateString();
+    const today = new Date().toISOString().slice(0, 10);
     
     if (p.lastInteractionDate !== today) {
       p.dailyInteractionPoints = 0;
