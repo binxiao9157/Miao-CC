@@ -14,7 +14,8 @@ export default function Home() {
   const location = useLocation();
   const { user, refreshCatStatus } = useAuthContext();
   const [cat, setCat] = useState<CatInfo | null>(null);
-  const [activeAction, setActiveAction] = useState<string | null>(null); // 当前正在播放的动作类型
+  const [visibleLayer, setVisibleLayer] = useState<string>('idle');
+  const hasPlayedEntry = useRef(false);
   const [bubbleText, setBubbleText] = useState<string | null>(null);
   const [bubbleId, setBubbleId] = useState<number>(0);
   const [points, setPoints] = useState<number>(0);
@@ -177,37 +178,43 @@ export default function Home() {
   // Handle visibility changes (KeepAlive resume) and cat changes
   useEffect(() => {
     if (location.pathname === "/") {
-      // Refresh cat info in case it was changed in another tab (e.g., Switch Companion)
       const info = storage.getActiveCat();
       if (info && info.id !== cat?.id) {
         setCat(info);
         setIsInitialized(false);
         setIsVideoReady(false);
-        setActiveAction(null);
+        setVisibleLayer('idle');
+        hasPlayedEntry.current = false;
       }
 
-      // Force play idle video
-      const playIdleVideo = async () => {
-        try {
-          if (idleVideoRef.current) {
-            await idleVideoRef.current.play();
-            // 待机视频开始播放后，允许加载其他动作视频
-            setCanLoadActions(true);
-          }
-        } catch (err) {
-          console.error("Idle video play failed:", err);
-        }
-      };
-      
-      playIdleVideo();
+      setCanLoadActions(true);
 
-      // 刷新问候语逻辑
+      if (!hasPlayedEntry.current) {
+        hasPlayedEntry.current = true;
+        const playEntryVideo = async () => {
+          try {
+            setTimeout(() => {
+              const hasRubbing = cat?.videoPaths?.rubbing && actionRefs['rubbing']?.current;
+              if (hasRubbing) {
+                const video = actionRefs['rubbing'].current!;
+                video.currentTime = 0;
+                video.play().catch(e => console.log("Entry video play failed:", e));
+              } else if (idleVideoRef.current) {
+                idleVideoRef.current.currentTime = 0;
+                idleVideoRef.current.play().catch(e => console.log("Idle video play failed:", e));
+              }
+            }, 100);
+          } catch (err) {
+            console.error("Entry video play failed:", err);
+          }
+        };
+        playEntryVideo();
+      }
+
       startGreetingTimer();
     } else {
-      // Pause all videos when leaving the tab to save resources
-      idleVideoRef.current?.pause();
+      if (idleVideoRef.current) idleVideoRef.current.pause();
       Object.values(actionRefs).forEach(ref => ref.current?.pause());
-      // 离开页面时清除定时器
       if (bubbleTimerRef.current) {
         clearTimeout(bubbleTimerRef.current);
         setBubbleText(null);
@@ -242,34 +249,23 @@ export default function Home() {
       if (p.history.length > 50) p.history.pop();
       storage.savePoints(p);
       setPoints(p.total);
-      triggerPointToast(`${actionName}！+5 互动奖励`);
-    } else {
-      triggerPointToast(`${actionName}！`);
+      triggerPointToast(`互动任务达成！积分 +5 🌟`);
     }
   };
 
   const triggerInteraction = (actionName: string, bubbleText: string, actionKey?: string) => {
     showFloatingBubble(bubbleText);
     handleInteraction(actionName);
-    
-    // 检查是否有多视频支持
+
     const hasMultiVideo = cat?.videoPaths && actionKey && cat.videoPaths[actionKey as keyof typeof cat.videoPaths];
 
     if (hasMultiVideo && actionKey && actionRefs[actionKey]?.current) {
       const video = actionRefs[actionKey].current;
       if (video) {
-        // 停止之前的动作视频
-        if (activeAction && actionRefs[activeAction]?.current) {
-          actionRefs[activeAction].current!.pause();
-          actionRefs[activeAction].current!.currentTime = 0;
-        }
-        
-        setActiveAction(actionKey);
         video.currentTime = 0;
         video.play().catch(() => {});
       }
     } else {
-      // 降级方案：如果没有多视频支持，或者是长按（通常是待机），则重置当前待机视频的进度
       if (idleVideoRef.current) {
         idleVideoRef.current.currentTime = 0;
         idleVideoRef.current.play().catch(() => {});
@@ -320,11 +316,19 @@ export default function Home() {
     setIsInitialized(true);
   };
 
-  const handleTimeUpdate = () => {
-    if (idleVideoRef.current && idleVideoRef.current.currentTime > 0 && !isVideoReady) {
-      setIsVideoReady(true);
+  const handleTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>, key: string) => {
+    const v = e.target as HTMLVideoElement;
+    if (v.currentTime > 0) {
+      if (!isVideoReady) setIsVideoReady(true);
+      if (visibleLayer !== key) {
+        setVisibleLayer(key);
+        if (key !== 'idle' && idleVideoRef.current) idleVideoRef.current.pause();
+        Object.entries(actionRefs).forEach(([k, ref]) => {
+          if (k !== key && ref.current) ref.current.pause();
+        });
+      }
     }
-  };
+  }, [isVideoReady, visibleLayer]);
 
   const handleLongPressStart = () => {
     isLongPressTriggered.current = false;
@@ -430,11 +434,13 @@ export default function Home() {
     secretTapTimer.current = setTimeout(() => setSecretTapCount(0), 2000);
   };
 
-  // 缓存互动视频元素，仅在视频路径或当前动作变化时重建
   const actionVideoEntries = useMemo(() => {
-    if (!cat?.videoPaths) return null;
+    if (!canLoadActions || !cat?.videoPaths) return null;
+    
     return Object.entries(cat.videoPaths).map(([key, url]) => {
+      // 确保 key 在 actionRefs 中存在
       if (!actionRefs[key]) return null;
+      
       return (
         <video
           key={key}
@@ -443,12 +449,16 @@ export default function Home() {
           muted
           playsInline
           preload="auto"
-          onEnded={() => setActiveAction(null)}
-          className={`absolute inset-0 w-full h-full z-20 transition-opacity duration-300 ${activeAction === key ? 'opacity-100' : 'opacity-0'} object-cover pointer-events-none`}
+          onTimeUpdate={(e) => handleTimeUpdate(e, key)}
+          onEnded={(e) => {
+            const video = e.target as HTMLVideoElement;
+            video.pause();
+          }}
+          className={`absolute inset-0 w-full h-full z-20 object-cover pointer-events-none ${visibleLayer === key ? 'opacity-100' : 'opacity-0'}`}
         />
       );
     });
-  }, [cat?.videoPaths, activeAction]);
+  }, [canLoadActions, cat?.videoPaths, visibleLayer, handleTimeUpdate]);
 
   if (!cat || !cat.name) {
     return (
@@ -461,16 +471,15 @@ export default function Home() {
   return (
     <div className="w-full h-full flex flex-col relative overflow-hidden bg-black touch-none z-0">
       {/* 视频播放器区域 - 采用 Stack 堆叠布局实现无缝切换 */}
-      <div className="absolute inset-0 flex items-center justify-center bg-black overflow-hidden z-10">
+      <div className="absolute inset-0 flex items-center justify-center bg-[#F8F9FA] overflow-hidden z-10">
         {/* 1. 待机视频层 (Idle) */}
         <video
           ref={idleVideoRef}
           src={cat?.videoPath || cat?.remoteVideoUrl || cat?.videoPaths?.petting || VIDEOS.DEFAULT}
-          autoPlay
           muted
           playsInline
-          loop
-          onTimeUpdate={handleTimeUpdate}
+          preload="auto"
+          onTimeUpdate={(e) => handleTimeUpdate(e, 'idle')}
           onLoadedMetadata={(e) => {
             const video = e.target as HTMLVideoElement;
             if (video.videoWidth && video.videoHeight) {
@@ -479,19 +488,23 @@ export default function Home() {
           }}
           onLoadedData={() => {
             setIsInitialized(true);
-            idleVideoRef.current?.play().catch(() => {});
-          }}
-          onPlaying={() => {
-            setIsInitialized(true);
             setIsVideoReady(true);
             setLoadError(false);
+            setCanLoadActions(true);
+            if (idleVideoRef.current) {
+              idleVideoRef.current.currentTime = 0;
+            }
+          }}
+          onEnded={(e) => {
+            const video = e.target as HTMLVideoElement;
+            video.pause();
           }}
           onError={handleVideoError}
-          className={`absolute inset-0 w-full h-full z-10 transition-opacity duration-500 opacity-100 object-cover`}
+          className={`absolute inset-0 w-full h-full z-10 object-cover ${visibleLayer === 'idle' ? 'opacity-100' : 'opacity-0'}`}
         />
 
         {/* 2. 互动视频层 (Actions) - 延迟加载并覆盖在待机层之上 */}
-        {canLoadActions && actionVideoEntries}
+        {actionVideoEntries}
         
         {/* 初始加载状态 */}
         {!isInitialized && !loadError && (

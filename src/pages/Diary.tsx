@@ -213,7 +213,7 @@ export default function Diary() {
           img.onload = () => {
             if (!isMountedRef.current) return;
             const canvas = document.createElement('canvas');
-            const MAX_SIZE = 800;
+            const MAX_SIZE = 800; // 日记图片可以稍微大一点，但也要限制
             let width = img.width;
             let height = img.height;
 
@@ -233,12 +233,14 @@ export default function Diary() {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-
+            
+            // 导出压缩后的 Base64 (JPEG 格式体积更小)
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
             setSelectedMedia({ url: compressedBase64, type: 'image' });
           };
           img.src = reader.result as string;
         } else {
+          // 视频暂时不压缩（Web 端压缩较复杂），但提醒用户限制大小
           if (file.size > 2 * 1024 * 1024) {
             alert("视频文件太大啦，请选择 2MB 以内的视频哦");
             return;
@@ -322,30 +324,30 @@ export default function Diary() {
       />
 
       <div className="px-6 mb-8">
-        <div className="bg-surface-container/50 p-1.5 rounded-[24px] flex relative overflow-hidden">
+        <div className="bg-[#FF9D76]/10 p-1.5 rounded-full flex relative overflow-hidden">
           <LayoutGroup id="diary-tabs">
             <button 
               onClick={() => setActiveTab('mine')}
-              className={`flex-1 py-3 rounded-[18px] text-sm font-black transition-all relative z-10 ${activeTab === 'mine' ? 'text-white' : 'text-on-surface-variant'}`}
+              className={`flex-1 py-3 rounded-full text-sm font-black transition-all relative z-10 ${activeTab === 'mine' ? 'text-white' : 'text-[#5D4037]/60 hover:bg-black/5'}`}
             >
               我的记录
               {activeTab === 'mine' && (
                 <motion.div 
                   layoutId="tab-bg"
-                  className="absolute inset-0 bg-primary rounded-[18px] -z-10 shadow-lg shadow-primary/20"
+                  className="absolute inset-0 bg-[#FF9D76] rounded-full -z-10 shadow-sm"
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}
             </button>
             <button 
               onClick={() => setActiveTab('friends')}
-              className={`flex-1 py-3 rounded-[18px] text-sm font-black transition-all relative z-10 ${activeTab === 'friends' ? 'text-white' : 'text-on-surface-variant'}`}
+              className={`flex-1 py-3 rounded-full text-sm font-black transition-all relative z-10 ${activeTab === 'friends' ? 'text-white' : 'text-[#5D4037]/60 hover:bg-black/5'}`}
             >
               好友动态
               {activeTab === 'friends' && (
                 <motion.div 
                   layoutId="tab-bg"
-                  className="absolute inset-0 bg-secondary rounded-[18px] -z-10 shadow-lg shadow-secondary/20"
+                  className="absolute inset-0 bg-[#FF9D76] rounded-full -z-10 shadow-sm"
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}

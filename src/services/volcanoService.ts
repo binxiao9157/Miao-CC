@@ -18,6 +18,30 @@ export const VolcanoConfig = {
 };
 
 /**
+ * 统一请求头构建辅助函数
+ */
+function buildHeaders(options?: { includeT2I?: boolean }) {
+  const apiKey = localStorage.getItem('VOLC_API_KEY') || VolcanoConfig.ApiKey;
+  const accessKey = localStorage.getItem('VOLC_ACCESS_KEY') || VolcanoConfig.AccessKey;
+  const secretKey = localStorage.getItem('VOLC_SECRET_KEY') || VolcanoConfig.SecretKey;
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Volc-API-Key': apiKey || '',
+    'X-Volc-Access-Key': accessKey || '',
+    'X-Volc-Secret-Key': secretKey || '',
+  };
+
+  if (options?.includeT2I) {
+    headers['X-Volc-T2I-Model-Id'] = localStorage.getItem('VOLC_T2I_MODEL_ID') || VolcanoConfig.T2IModelId;
+  } else {
+    headers['X-Volc-Model-Id'] = localStorage.getItem('VOLC_MODEL_ID') || VolcanoConfig.ModelId;
+  }
+
+  return headers;
+}
+
+/**
  * 互动动作对应的 Prompt 模版 (Seedance 高精度指令)
  */
 export const ACTION_PROMPTS = {
@@ -34,28 +58,6 @@ export const IMAGE_PROMPTS = {
   anchor: (breed: string, color: string) => 
     `A ultra-realistic, high-detail portrait of a ${breed} cat with ${color} fur, sitting comfortably in a soft cat nest, cinematic lighting, 4k resolution, looking at the camera.`
 };
-
-/** 构建 API 请求通用 Headers */
-function buildHeaders(options?: { includeT2I?: boolean }) {
-  const apiKey = localStorage.getItem('VOLC_API_KEY') || VolcanoConfig.ApiKey;
-  const accessKey = localStorage.getItem('VOLC_ACCESS_KEY') || VolcanoConfig.AccessKey;
-  const secretKey = localStorage.getItem('VOLC_SECRET_KEY') || VolcanoConfig.SecretKey;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Volc-API-Key': apiKey,
-    'X-Volc-Access-Key': accessKey,
-    'X-Volc-Secret-Key': secretKey,
-  };
-
-  if (options?.includeT2I) {
-    headers['X-Volc-T2I-Model-Id'] = localStorage.getItem('VOLC_T2I_MODEL_ID') || VolcanoConfig.T2IModelId;
-  } else {
-    headers['X-Volc-Model-Id'] = localStorage.getItem('VOLC_MODEL_ID') || VolcanoConfig.ModelId;
-  }
-
-  return headers;
-}
 
 /**
  * 火山引擎方舟视频生成服务
@@ -75,13 +77,13 @@ export class VolcanoService {
         prompt: prompt || "A high quality video of this cat, cinematic lighting, realistic.",
         image_base64: imageBase64,
         parameters: {
-          seed: 12345,
+          seed: 12345, // 固定种子值，确保连贯性
           resolution: "480p",
           duration: 5,
           audio: false
         }
       }, {
-        timeout: 310000,
+        timeout: 310000, 
         headers: buildHeaders()
       });
       
@@ -134,7 +136,7 @@ export class VolcanoService {
 
     try {
       const response = await axios.get(`/api/video-status/${taskId}`, {
-        timeout: 60000,
+        timeout: 60000, // Added 60 seconds timeout
         headers: buildHeaders()
       });
       return response.data;
@@ -193,7 +195,7 @@ export class VolcanoService {
   }
 
   /**
-   * 轮询文生图结果（指数退避：初始 2s，×1.5，上限 10s）
+   * 轮询文生图结果 (指数退避策略)
    */
   public static async pollImageResult(taskId: string, signal?: AbortSignal): Promise<string> {
     if (VolcanoConfig.MOCK_MODE) {
@@ -201,88 +203,95 @@ export class VolcanoService {
       return 'https://picsum.photos/seed/cat/800/800';
     }
 
-    let delay = 2000;
-    const MAX_DELAY = 10000;
-    const BACKOFF_FACTOR = 1.5;
-    const maxWaitTimeMs = 120000; // 2 分钟超时
+    let delay = 2000; // 初始 2s
+    const maxDelay = 10000; // 最大 10s
     const startTime = Date.now();
+    const maxWaitTimeMs = 120000; // 2分钟超时
 
     while (true) {
       if (signal?.aborted) throw new Error("任务中止");
       if (Date.now() - startTime > maxWaitTimeMs) throw new Error("图片生成超时");
 
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => { clearTimeout(timerId); reject(new Error("任务中止")); };
-        const timerId = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, delay);
-        signal?.addEventListener('abort', onAbort, { once: true });
-      });
-
+      // 1. 网络请求（可重试）
+      let result: any;
       try {
         const response = await axios.get(`/api/image-status/${taskId}`, {
           headers: {
             'X-Volc-API-Key': localStorage.getItem('VOLC_API_KEY') || VolcanoConfig.ApiKey
-          }
+          },
+          signal
         });
-
-        const result = response.data;
-        if (result.status === 'succeeded') {
-          const imageUrl = result.output?.image_url || result.data?.image_url || result.image_url;
-          if (imageUrl) return imageUrl;
-          throw new Error("任务成功但未获取到图片地址");
-        } else if (result.status === 'failed') {
-          const errorInfo = result.error || result.message || "未知错误";
-          throw new Error(`图片生成失败: ${typeof errorInfo === 'string' ? errorInfo : JSON.stringify(errorInfo)}`);
-        }
+        result = response.data;
       } catch (error: any) {
-        // 网络超时/连接错误 → 允许重试（continue 回到 while 循环）
-        const isNetworkError = error.code === 'ECONNABORTED' || error.message?.includes('timeout') || error.code === 'ERR_NETWORK';
-        if (isNetworkError) {
-          console.warn("pollImageResult 网络错误，将重试:", error.message);
-          // 继续循环，走到下面的退避逻辑
-        } else {
-          // 业务错误（任务失败、数据异常等）直接抛出
-          throw error;
-        }
+        if (axios.isCancel(error) || signal?.aborted) throw new Error("任务中止");
+        // 网络错误或 5xx → 重试；4xx → 直接抛出
+        const status = error.response?.status;
+        if (status && status < 500) throw error;
+        console.warn("Polling encountered network/server error, retrying...", error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 1.5, maxDelay);
+        continue;
       }
 
-      delay = Math.min(delay * BACKOFF_FACTOR, MAX_DELAY);
+      // 2. 结果解析（业务逻辑错误，直接抛出不重试）
+      if (result.status === 'succeeded') {
+        const imageUrl = result.output?.image_url || result.data?.image_url || result.image_url;
+        if (imageUrl) return imageUrl;
+        throw new Error("任务成功但未获取到图片地址");
+      } else if (result.status === 'failed') {
+        const errorInfo = result.error || result.message || "未知错误";
+        throw new Error(`图片生成失败: ${typeof errorInfo === 'string' ? errorInfo : JSON.stringify(errorInfo)}`);
+      }
+
+      // 等待并增加延迟（指数退避）
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, maxDelay);
     }
   }
 
   /**
-   * 轮询逻辑 (Polling Logic)
-   * 使用指数退避策略：初始 3s，每次 ×1.5，上限 15s
+   * 轮询视频生成结果 (指数退避策略)
    */
   public static async pollTaskResult(
-    taskId: string,
+    taskId: string, 
     onProgress?: (status: string) => void,
     signal?: AbortSignal,
     maxWaitTimeMs: number = 300000 // 默认 5 分钟超时
   ): Promise<string> {
-    const startTime = Date.now();
+    if (VolcanoConfig.MOCK_MODE) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return 'https://www.w3schools.com/html/mov_bbb.mp4';
+    }
+
     let delay = 3000; // 初始 3s
-    const MAX_DELAY = 15000;
-    const BACKOFF_FACTOR = 1.5;
+    const maxDelay = 15000; // 最大 15s
+    const startTime = Date.now();
 
     while (true) {
       if (signal?.aborted) throw new Error("任务轮询已中止");
       if (Date.now() - startTime > maxWaitTimeMs) throw new Error("任务轮询超时 (5分钟)");
 
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => { clearTimeout(timerId); reject(new Error("任务轮询已中止")); };
-        const timerId = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, delay);
-        signal?.addEventListener('abort', onAbort, { once: true });
-      });
+      // 1. 网络请求（可重试）
+      let result: any;
+      try {
+        result = await this.getTaskResult(taskId);
+      } catch (error: any) {
+        if (signal?.aborted) throw new Error("任务轮询已中止");
+        // getTaskResult 内部已处理网络/超时错误并抛出友好消息
+        // 检查是否为可重试的网络错误
+        const httpStatus = error.response?.status;
+        if (httpStatus && httpStatus < 500) throw error;
+        console.warn("Polling encountered error, retrying...", error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 1.5, maxDelay);
+        continue;
+      }
 
-      const result = await this.getTaskResult(taskId);
-      console.log(`[DEBUG] Task ${taskId} status: ${result.status}`);
-
+      // 2. 结果解析（业务逻辑错误，直接抛出不重试）
       const status = result.status;
       if (onProgress) onProgress(status);
 
       if (status === 'succeeded') {
-        console.log("[DEBUG] Task succeeded. Full result:", JSON.stringify(result, null, 2));
-
         let videoUrl =
           result.output?.video_url ||
           result.content?.video_url ||
@@ -301,8 +310,9 @@ export class VolcanoService {
         throw new Error(`任务失败，状态: ${status}, 错误: ${JSON.stringify(result.error || result.message)}`);
       }
 
-      // 指数退避
-      delay = Math.min(delay * BACKOFF_FACTOR, MAX_DELAY);
+      // 等待并增加延迟
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, maxDelay);
     }
   }
 }
