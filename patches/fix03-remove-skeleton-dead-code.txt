@@ -1,0 +1,42 @@
+===================================================================
+Fix #3: 删除 NotificationList / TimeLetters 骨架屏死代码
+问题：isLoading 初始为 false 且从未设为 true，骨架屏组件和
+     条件分支永远不会执行，是纯死代码。
+     数据来自 localStorage 同步读取，不需要 loading 态。
+方案：删除 isLoading 状态、Skeleton 组件、条件分支。
+===================================================================
+
+--- a/src/pages/NotificationList.tsx
++++ b/src/pages/NotificationList.tsx
+
+  删除 NotificationSkeleton 组件定义（约 15 行）:
+-  const NotificationSkeleton = () => (
+-    <div className="miao-card p-5 flex items-start gap-4 animate-pulse">
+-      ...
+-    </div>
+-  );
+
+  简化渲染条件:
+-      {isLoading ? (
+-        Array(3).fill(0).map((_, i) => <NotificationSkeleton key={i} />)
+-      ) : notifications.length === 0 ? (
++      {notifications.length === 0 ? (
+
+--- a/src/pages/TimeLetters.tsx
++++ b/src/pages/TimeLetters.tsx
+
+  删除 isLoading 状态:
+-  const [isLoading, setIsLoading] = useState(false);
+
+  删除 LetterSkeleton 组件定义（约 14 行）:
+-  const LetterSkeleton = () => (
+-    <div className="miao-card flex items-center gap-6 animate-pulse">
+-      ...
+-    </div>
+-  );
+
+  简化渲染条件:
+-        {isLoading ? (
+-          Array(3).fill(0).map((_, i) => <LetterSkeleton key={i} />)
+-        ) : letters.length === 0 ? (
++        {letters.length === 0 ? (

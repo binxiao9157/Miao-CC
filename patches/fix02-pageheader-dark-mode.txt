@@ -1,0 +1,18 @@
+===================================================================
+Fix #2: PageHeader 返回按钮 dark 模式颜色修复
+问题：onBack 按钮 className 硬编码 text-on-surface-variant，
+     dark 模式下箭头不可见（深色背景 + 深色图标）。
+方案：根据 dark prop 动态切换颜色。
+===================================================================
+
+--- a/src/components/PageHeader.tsx
++++ b/src/components/PageHeader.tsx
+@@ -22,7 +22,7 @@
+         {onBack && (
+           <button
+             onClick={onBack}
+-            className="p-2 -ml-2 text-on-surface-variant active:scale-90 transition-transform"
++            className={`p-2 -ml-2 active:scale-90 transition-transform ${dark ? 'text-white/80' : 'text-on-surface-variant'}`}
+           >
+             <ArrowLeft size={24} />
+           </button>

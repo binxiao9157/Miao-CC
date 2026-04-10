@@ -1,0 +1,23 @@
+===================================================================
+Fix #5: MainLayout Outlet 排除条件解耦为数组驱动
+问题：每新增一个持久化 Tab，必须同步修改
+     !isHome && !isDiary && !isTimeLetters && !isNotifications
+     条件，遗漏将导致 /points、/profile 等子路由被遮挡。
+方案：用 persistentPaths 数组集中管理，自动判断。
+===================================================================
+
+--- a/src/components/layout/MainLayout.tsx
++++ b/src/components/layout/MainLayout.tsx
+@@ -14,9 +14,8 @@
+   const isHome = location.pathname === "/";
+-  const isDiary = location.pathname === "/diary";
+-  const isTimeLetters = location.pathname === "/time-letters";
+-  const isNotifications = location.pathname === "/notifications";
++  const persistentPaths = ['/diary', '/time-letters', '/notifications'];
++  const isPersistentTab = persistentPaths.includes(location.pathname);
+
+@@ -80,7 +79,7 @@
+       {/* Other routes will render here */}
+-      {!isHome && !isDiary && !isTimeLetters && !isNotifications && (
++      {!isHome && !isPersistentTab && (
+         <div className="relative z-10 ...">

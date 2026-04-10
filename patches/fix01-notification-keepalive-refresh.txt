@@ -1,0 +1,83 @@
+===================================================================
+Fix #1: NotificationList keep-alive 路由激活时静默刷新通知数据
+问题：通知页作为持久化 Tab，useState 惰性初始化只执行一次，
+     切回通知页后新积分变动、新解锁信件永远不会出现。
+方案：抽出 computeNotifications() 纯函数，useEffect 监听
+     location.pathname，路由匹配时直接 setState 替换，
+     不清空列表，无闪烁无偏移。
+===================================================================
+
+--- a/src/pages/NotificationList.tsx
++++ b/src/pages/NotificationList.tsx
+@@ -1,7 +1,7 @@
+-import { useNavigate } from "react-router-dom";
+-import { ArrowLeft, Settings, Mail, Star, Bell, ChevronRight } from "lucide-react";
++import { useNavigate, useLocation } from "react-router-dom";
++import { Settings, Mail, Star, Bell, ChevronRight } from "lucide-react";
+ import { motion } from "motion/react";
+-import { useEffect, useState } from "react";
++import { useEffect, useState, useCallback } from "react";
+ import { storage } from "../services/storage";
+ import PageHeader from "../components/PageHeader";
+
+@@ -38,47 +38,53 @@
++/** 从 localStorage 同步计算通知列表 */
++function computeNotifications(): NotificationItem[] {
++  const points = storage.getPoints();
++  const letters = storage.getTimeLetters();
++  const now = Date.now();
++  const items: NotificationItem[] = [];
++
++  const unlockedLetters = letters.filter(l => l.unlockAt <= now);
++  if (unlockedLetters.length > 0) {
++    items.push({
++      id: 'letter_unlocked',
++      type: 'letter',
++      title: '时光信件解锁',
++      content: `你有 ${unlockedLetters.length} 封时光信件已解锁，快去看看吧～`,
++      timestamp: unlockedLetters[unlockedLetters.length - 1].unlockAt,
++      link: '/time-letters'
++    });
++  }
++
++  if (points.history.length > 0) {
++    const lastTx = points.history[0];
++    items.push({
++      id: 'points_update',
++      type: 'points',
++      title: '积分变动提醒',
++      content: `${lastTx.type === 'earn' ? '获得' : '消耗'}了 ${lastTx.amount} 积分：${lastTx.reason}`,
++      timestamp: lastTx.timestamp
++    });
++  }
++
++  items.push({
++    id: 'system_greeting',
++    type: 'system',
++    title: '系统问候',
++    content: '今天也是元气满满的一天，记得给猫咪加餐哦。',
++    timestamp: now
++  });
++
++  return items.sort((a, b) => b.timestamp - a.timestamp);
++}
++
+ export default function NotificationList() {
+   const navigate = useNavigate();
+-  const [isLoading, setIsLoading] = useState(false);
+-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+-    // ... 原来的惰性初始化逻辑全部移到 computeNotifications()
+-  });
+-
+-  useEffect(() => {
+-    // Keep alive component, re-fetch logic can be added here if needed
+-  }, []);
++  const location = useLocation();
++  const [notifications, setNotifications] = useState<NotificationItem[]>(() => computeNotifications());
++
++  // keep-alive：路由激活时静默刷新数据，不清空列表，无闪烁
++  useEffect(() => {
++    if (location.pathname === '/notifications') {
++      setNotifications(computeNotifications());
++    }
++  }, [location.pathname]);

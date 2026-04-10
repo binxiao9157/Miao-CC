@@ -1,0 +1,17 @@
+===================================================================
+Fix #6: NotificationList navigate(-1) 改为 navigate("/")
+问题：keep-alive Tab 中 navigate(-1) 不稳定，深链接场景下
+     可能退出应用或跳转到非预期页面。
+方案：固定返回首页。
+===================================================================
+
+--- a/src/pages/NotificationList.tsx
++++ b/src/pages/NotificationList.tsx
+@@ -108,7 +108,7 @@
+       <PageHeader
+         title="消息中心"
+         subtitle="Message Center"
+-        onBack={() => navigate(-1)}
++        onBack={() => navigate("/")}
+         action={...}
+       />

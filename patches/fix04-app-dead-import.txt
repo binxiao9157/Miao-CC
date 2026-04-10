@@ -1,0 +1,16 @@
+===================================================================
+Fix #4: 删除 App.tsx 中未使用的 NotificationList lazy import
+问题：/notifications 路由已移入 MainLayout 持久化 Tab，
+     MainLayout 直接 import NotificationList，App.tsx 的
+     lazy import 已无 Route 使用，成为死代码。
+方案：删除第 22 行。
+===================================================================
+
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -19,7 +19,6 @@
+ const ChangePassword = lazy(() => import("./pages/ChangePassword"));
+ const PrivacySettings = lazy(() => import("./pages/PrivacySettings"));
+ const Notifications = lazy(() => import("./pages/Notifications"));
+-const NotificationList = lazy(() => import("./pages/NotificationList"));
+ const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
