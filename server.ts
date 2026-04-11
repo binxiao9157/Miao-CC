@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import axios from "axios";
+import https from "https";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -12,11 +13,28 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
-  const ARK_API_KEY = process.env.VOLC_API_KEY;
-  const ARK_MODEL_ID = process.env.VOLC_MODEL_ID || "doubao-seedance-1-5-pro-251215";
-  const ARK_T2I_MODEL_ID = process.env.VOLC_T2I_MODEL_ID || "doubao-t2i-v2";
+  const httpsAgent = new https.Agent({
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    maxSockets: 100,
+    timeout: 60000
+  });
+
+  // Health check endpoint
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      env: process.env.NODE_ENV,
+      hasApiKey: !!process.env.VOLC_API_KEY
+    });
+  });
+
+  const ARK_API_KEY = process.env.VITE_VOLC_API_KEY || process.env.VOLC_API_KEY;
+  const ARK_MODEL_ID = process.env.VITE_VOLC_MODEL_ID || process.env.VOLC_MODEL_ID || "doubao-seedance-1-5-pro-251215";
+  const ARK_T2I_MODEL_ID = process.env.VITE_VOLC_T2I_MODEL_ID || process.env.VOLC_T2I_MODEL_ID || "doubao-t2i-v2";
   // 还原为用户确认可用的 Seedance 专用任务接口端点
-  const ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks";
+  const ARK_BASE_URL = process.env.VITE_VOLC_ENDPOINT || "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks";
 
   console.log("Server Config:", {
     hasApiKey: !!ARK_API_KEY,
@@ -89,7 +107,7 @@ async function startServer() {
       }
 
       const requestBody = {
-        model: ARK_T2I_MODEL_ID,
+        model: req.body.model || ARK_T2I_MODEL_ID,
         prompt: prompt,
         size: "1024x1024"
       };
@@ -100,13 +118,33 @@ async function startServer() {
         prompt: prompt.substring(0, 50) + "..."
       });
 
-      const response = await axios.post(ARK_T2I_URL, requestBody, {
-        headers: {
-          'Authorization': `Bearer ${ARK_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 60000
-      });
+      let response;
+      let retries = 2;
+      while (retries >= 0) {
+        try {
+          response = await axios.post(ARK_T2I_URL, requestBody, {
+            headers: {
+              'Authorization': `Bearer ${ARK_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            httpsAgent,
+            timeout: 60000
+          });
+          break;
+        } catch (error: any) {
+          if (error.code === 'ECONNRESET' && retries > 0) {
+            console.warn(`Ark T2I Connection Reset, retrying... (${retries} left)`);
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      if (!response) {
+        throw new Error("Failed to get response from Ark T2I API after retries");
+      }
 
       const imageUrl = response.data?.data?.[0]?.url;
       if (imageUrl) {
@@ -147,11 +185,28 @@ async function startServer() {
     }
 
     try {
-      const response = await axios.get(`${ARK_BASE_URL}/${taskId}`, {
-        headers: {
-          'Authorization': `Bearer ${ARK_API_KEY}`
+      let response;
+      let retries = 2;
+      while (retries >= 0) {
+        try {
+          response = await axios.get(`${ARK_BASE_URL}/${taskId}`, {
+            headers: {
+              'Authorization': `Bearer ${ARK_API_KEY}`
+            },
+            httpsAgent
+          });
+          break;
+        } catch (error: any) {
+          if (error.code === 'ECONNRESET' && retries > 0) {
+            console.warn(`Ark Image Status Connection Reset, retrying... (${retries} left)`);
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw error;
         }
-      });
+      }
+      if (!response) throw new Error("Failed to get image status after retries");
       res.json(response.data);
     } catch (error: any) {
       sendError(res, error, "查询图片状态失败");
@@ -205,41 +260,75 @@ async function startServer() {
       });
 
       const requestBody: any = {
-        model: ARK_MODEL_ID,
+        model: req.body.model || ARK_MODEL_ID,
         content: contentArray,
         parameters: {
-          size: parameters?.resolution === "480p" ? "854x480" : (parameters?.size || "854x480"),
+          size: parameters?.resolution === "480p" ? "720x1280" : (parameters?.size || "720x1280"),
           seed: parameters?.seed || 12345,
           duration: parameters?.duration || 5,
-          audio: parameters?.audio || false,
-          first_frame_constraint: true,
-          negative_prompt: negative_prompt || ""
+          fps: 25,
+          first_frame_constraint: true
         }
       };
+      
+      if (negative_prompt) {
+        requestBody.parameters.negative_prompt = negative_prompt;
+      }
 
       console.log("Submitting task to Ark:", {
         model: ARK_MODEL_ID,
-        url: ARK_BASE_URL
+        url: ARK_BASE_URL,
+        payloadSize: JSON.stringify(requestBody).length
       });
 
-      const response = await axios.post(
-        ARK_BASE_URL,
-        requestBody,
-        {
-          headers: {
-            'Authorization': `Bearer ${ARK_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-          timeout: 300000
+      let response;
+      let retries = 2;
+      while (retries >= 0) {
+        try {
+          response = await axios.post(
+            ARK_BASE_URL,
+            requestBody,
+            {
+              headers: {
+                'Authorization': `Bearer ${ARK_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              httpsAgent,
+              maxContentLength: Infinity,
+              maxBodyLength: Infinity,
+              timeout: 120000 // 2 minutes for submission
+            }
+          );
+          break; // Success, exit loop
+        } catch (error: any) {
+          if (error.code === 'ECONNRESET' && retries > 0) {
+            console.warn(`Ark API Connection Reset, retrying... (${retries} left)`);
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw error; // Re-throw if not ECONNRESET or no retries left
         }
-      );
+      }
+
+      if (!response) {
+        throw new Error("Failed to get response from Ark API after retries");
+      }
 
       console.log("Ark Submit Success:", response.data.id || "No ID");
       res.json(response.data);
     } catch (error: any) {
       console.error("Ark API Error:", error.message);
+      
+      // 针对 SetLimitExceeded 错误提供友好提示
+      if (error.response?.data?.code === 'SetLimitExceeded') {
+        return res.status(403).json({
+          error: "账号推理限额已达上限",
+          message: "您的火山引擎账号已触发安全限额保护。请前往火山引擎方舟控制台，在『模型接入』页面关闭『安全体验模式』或调高限额。",
+          raw: error.response.data
+        });
+      }
+      
       sendError(res, error, "提交任务失败");
     }
   });
@@ -253,21 +342,75 @@ async function startServer() {
     }
 
     try {
-      const response = await axios.get(
-        `${ARK_BASE_URL}/${taskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${ARK_API_KEY}`
-          },
-          timeout: 60000
+      let response;
+      let retries = 2;
+      while (retries >= 0) {
+        try {
+          response = await axios.get(
+            `${ARK_BASE_URL}/${taskId}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${ARK_API_KEY}`
+              },
+              httpsAgent,
+              timeout: 60000
+            }
+          );
+          break;
+        } catch (error: any) {
+          if (error.code === 'ECONNRESET' && retries > 0) {
+            console.warn(`Ark Video Status Connection Reset, retrying... (${retries} left)`);
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw error;
         }
-      );
+      }
       
+      if (!response) throw new Error("Failed to get video status after retries");
+      
+      if (response.data.status === 'failed') {
+        console.error(`Ark Task ${taskId} FAILED. Full Response:`, JSON.stringify(response.data, null, 2));
+        const arkError = response.data.error || response.data.message || "Unknown Ark Error";
+        return res.status(200).json({
+          ...response.data,
+          error: arkError
+        });
+      }
+
       console.log(`Ark Status for ${taskId}:`, response.data.status);
       res.json(response.data);
     } catch (error: any) {
       console.error("Ark Status Error:", error.message);
       sendError(res, error, "查询状态失败");
+    }
+  });
+
+  // Video proxy to bypass CORS for frame extraction
+  app.get("/api/proxy-video", async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).send("Missing url parameter");
+    }
+
+    try {
+      const response = await axios({
+        method: 'get',
+        url: url,
+        responseType: 'stream',
+        httpsAgent,
+        timeout: 60000 // 增加到 60 秒
+      });
+
+      // Forward headers
+      res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      
+      response.data.pipe(res);
+    } catch (error: any) {
+      console.error("Video proxy error:", error.message);
+      res.status(500).send("Failed to proxy video");
     }
   });
 

@@ -5,7 +5,6 @@
 
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-
 // 使用 React.lazy 延迟加载所有页面和布局
 const MainLayout = lazy(() => import("./components/layout/MainLayout"));
 const Login = lazy(() => import("./pages/Login"));
@@ -72,7 +71,7 @@ function AppRoutes() {
             hasCat ? <Navigate to="/" replace /> : <Navigate to="/empty-cat" replace />
           ) : <ResetPassword />
         } />
-
+        
         {/* Onboarding & Special Pages (No Bottom Nav) */}
         <Route path="/empty-cat" element={<ProtectedRoute>{!hasCat ? <EmptyCatPage /> : <Navigate to="/" replace />}</ProtectedRoute>} />
         <Route path="/welcome" element={<ProtectedRoute><Welcome /></ProtectedRoute>} />
@@ -82,7 +81,7 @@ function AppRoutes() {
         <Route path="/cat-player/:id" element={<ProtectedRoute><CatPlayer /></ProtectedRoute>} />
         <Route path="/cat-history" element={<ProtectedRoute><CatHistory /></ProtectedRoute>} />
         <Route path="/accompany-milestone" element={<ProtectedRoute><AccompanyMilestonePage /></ProtectedRoute>} />
-
+  
         {/* Main App Routes (with Bottom Nav) */}
         <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route path="/" element={hasCat ? <></> : <Navigate to="/empty-cat" replace />} />
@@ -92,7 +91,7 @@ function AppRoutes() {
           <Route path="/points" element={hasCat ? <></> : <Navigate to="/empty-cat" replace />} />
           <Route path="/profile" element={hasCat ? <></> : <Navigate to="/empty-cat" replace />} />
         </Route>
-
+  
         {/* Settings & Detail Routes (No Bottom Nav) */}
         <Route path="/edit-profile" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
         <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
@@ -102,7 +101,7 @@ function AppRoutes() {
         <Route path="/switch-companion" element={<ProtectedRoute><SwitchCompanion /></ProtectedRoute>} />
         <Route path="/add-friend-qr" element={<ProtectedRoute><AddFriendQR /></ProtectedRoute>} />
         <Route path="/scan-friend" element={<ProtectedRoute><ScanFriend /></ProtectedRoute>} />
-
+  
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

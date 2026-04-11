@@ -30,7 +30,7 @@ export default function MainLayout() {
   ];
 
   const [visitedTabs, setVisitedTabs] = React.useState<Set<string>>(new Set([location.pathname]));
-
+  
   React.useEffect(() => {
     setVisitedTabs(prev => new Set(prev).add(location.pathname));
   }, [location.pathname]);
@@ -91,9 +91,9 @@ export default function MainLayout() {
     <div className={`w-full h-full relative overflow-hidden ${isHome ? 'bg-black' : 'bg-background'}`}>
       <Suspense fallback={<div className="fixed inset-0 bg-[#FFF5F0] flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>}>
       {/* Keep Home alive */}
-      <motion.div
+      <motion.div 
         initial={false}
-        animate={{
+        animate={{ 
           opacity: isHome ? 1 : 0,
           zIndex: isHome ? 0 : -10,
           scale: isHome ? 1 : 0.98
@@ -103,10 +103,10 @@ export default function MainLayout() {
       >
         {hasCat && <HomePage />}
       </motion.div>
-
+      
       {/* Keep Diary alive */}
       {hasCat && renderPersistentTab("/diary", DiaryPage)}
-
+      
       {/* Keep TimeLetters alive */}
       {hasCat && renderPersistentTab("/time-letters", TimeLettersPage)}
 

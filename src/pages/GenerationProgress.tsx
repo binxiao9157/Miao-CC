@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
+import axios from "axios";
 import { Sparkles, Loader2, CheckCircle2, AlertCircle, PartyPopper, Coins, ArrowRight } from "lucide-react";
 import { VolcanoService, ACTION_PROMPTS, IMAGE_PROMPTS } from "../services/volcanoService";
 import { FileManager } from "../services/fileManager";
 import { storage } from "../services/storage";
 import { useAuthContext } from "../context/AuthContext";
+import { extractFrameFromUrl } from "../lib/videoUtils";
 
 import { GoogleGenAI } from "@google/genai";
 
@@ -24,7 +26,12 @@ export default function GenerationProgress() {
   const [isGenerating, setIsGenerating] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
   const [anchorImage, setAnchorImage] = useState<string | null>(null);
-  const [phase, setPhase] = useState<'t2i' | 'preview' | 'i2v' | 'success'>('t2i');
+  const [phase, setPhase] = useState<'t2i' | 'preview' | 'i2v' | 'confirm' | 'success'>('t2i');
+  const [idleVideoUrl, setIdleVideoUrl] = useState<string | null>(null);
+  const [loopCount, setLoopCount] = useState(0);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const resetGenerationState = () => {
     setIsGenerating(false);
@@ -33,6 +40,8 @@ export default function GenerationProgress() {
     setStatus("正在准备生成...");
     setAnchorImage(null);
     setPhase('t2i');
+    setLoopCount(0);
+    setShowConfirmDialog(false);
   };
 
   const handleRetry = () => {
@@ -45,7 +54,7 @@ export default function GenerationProgress() {
     try {
       setPhase('i2v');
 
-      // 积分前置检查：在生成视频之前验证积分是否足够
+      // 积分前置检查
       if (isRedemption && !isDebugRedemption) {
         const currentPoints = storage.getPoints();
         const required = redemptionAmount || 200;
@@ -54,8 +63,6 @@ export default function GenerationProgress() {
         }
       }
       
-      // 优化：在提交 I2V 之前，如果图片是 base64 且尺寸过大，进行压缩
-      // 这可以有效防止 "timeout of 150000ms exceeded" 错误
       let optimizedImg = img;
       if (img.startsWith('data:image')) {
         setStatus("正在优化图像数据...");
@@ -89,93 +96,145 @@ export default function GenerationProgress() {
         }
       }
 
-      // 2. 提交 I2V 任务 (优先级排序)
-      setStatus("正在教小猫学习第一个技能...");
-      setProgress(40);
+      // 第一阶段：生成核心待机视频 (0-100%)
+      setStatus("正在生成核心待机视频...");
+      setProgress(10);
       
-      const actions = Object.keys(ACTION_PROMPTS) as Array<keyof typeof ACTION_PROMPTS>;
-      const priorityAction = 'petting'; // 摸头/待机作为优先级最高的视频
-      const otherActions = actions.filter(a => a !== priorityAction);
-
-      // 先提交优先级任务
-      const priorityPrompt = ACTION_PROMPTS[priorityAction];
-      const priorityTask = await VolcanoService.submitTask(optimizedImg, priorityPrompt);
+      const idleTask = await VolcanoService.submitTask(optimizedImg, ACTION_PROMPTS.idle);
+      setProgress(30);
       
-      // 立即开始轮询优先级任务
-      setStatus("正在生成核心互动视频...");
-      setProgress(60);
-      const priorityVideoUrl = await VolcanoService.pollTaskResult(
-        priorityTask.id,
-        undefined,
+      const url = await VolcanoService.pollTaskResult(
+        idleTask.id,
+        (s) => setStatus(`正在生成待机视频 (${s})...`),
         abortSignal
       );
-
-      // 3. 优先级视频就绪，先保存基础信息
-      setStatus("核心技能已就绪！");
-      setProgress(90);
-      const groupId = 'group_' + Date.now();
       
-      // 先保存包含首个视频的猫咪信息
-      const initialVideoMap: { [key: string]: string } = { [priorityAction]: priorityVideoUrl };
-      await FileManager.downloadVideos(
-        initialVideoMap, 
-        groupId, 
-        name || breed || "我的 AI 猫咪", 
-        img,
-        { breed, furColor, source: image ? 'upload' : 'created', placeholderImage: image }
-      );
-
-      // 4. 触发后台生成任务 (不阻塞 UI)
-      const runBackgroundTasks = async (signal: AbortSignal) => {
-        for (const action of otherActions) {
-          if (signal.aborted) return;
-          try {
-            const prompt = ACTION_PROMPTS[action];
-            const task = await VolcanoService.submitTask(optimizedImg, prompt);
-            const url = await VolcanoService.pollTaskResult(task.id, undefined, signal);
-            
-            // 更新本地存储中的视频路径
-            const currentCat = storage.getCatById(groupId);
-            if (currentCat) {
-              const updatedPaths = { ...currentCat.videoPaths, [action]: url };
-              storage.saveCatInfo({ ...currentCat, videoPaths: updatedPaths });
-            }
-          } catch (e) {
-          }
-        }
-      };
-      
-      runBackgroundTasks(abortSignal); // 异步执行，不 await
-
-      // 5. 扣除积分 (已在前面预检查过，在 UI 更新之前执行)
-      if (isRedemption && !isDebugRedemption) {
-        storage.deductPoints(redemptionAmount || 200, "解锁新伙伴");
-      }
-
-      // 6. 完成并显示入场
-      setStatus("生成成功！");
+      console.log("Idle video generated:", url);
+      setIdleVideoUrl(url);
       setProgress(100);
-      setPhase('success');
-
-      // 确保活跃 ID 已设置
-      storage.setActiveCatId(groupId);
-      
-      // 更新全局猫咪状态
-      refreshCatStatus();
-      
-      setTimeout(() => {
-        if (!abortSignal.aborted) {
-          setShowSuccess(true);
-        }
-      }, 1000);
+      setPhase('confirm');
+      setStatus("生成成功！");
     } catch (err: any) {
       if (err.message === "任务轮询已中止" || err.message === "任务中止") return;
-      console.error("I2V 过程出错:", err);
-      setError(err.message || "视频生成失败");
+      console.error("生成过程出错:", err);
+      setError(err.message || "生成失败");
     }
   };
 
+  const handleUnlockAll = async () => {
+    if (!idleVideoUrl) return;
+    
+    const groupId = 'group_' + Date.now();
+    const optimizedImg = anchorImage || image;
+
+    // 1. 提取锚定帧
+    let anchorFrame;
+    try {
+      anchorFrame = await extractFrameFromUrl(idleVideoUrl, 0.1);
+    } catch (e) {
+      anchorFrame = optimizedImg;
+    }
+
+    // 2. 先以基础版保存并进入首页
+    await FileManager.downloadVideos(
+      { idle: idleVideoUrl }, 
+      groupId, 
+      name || breed || "我的 AI 猫咪", 
+      image || anchorImage || "",
+      { 
+        breed, 
+        furColor, 
+        source: image ? 'upload' : 'created', 
+        placeholderImage: anchorFrame,
+        anchorFrame: anchorFrame 
+      }
+    );
+    
+    // 标记为正在解锁
+    await FileManager.updateCatVideos(groupId, {}, true);
+
+    // 扣除积分
+    if (isRedemption && !isDebugRedemption) {
+      storage.deductPoints(redemptionAmount || 200, "解锁新伙伴");
+    }
+
+    storage.setActiveCatId(groupId);
+    refreshCatStatus();
+    navigate("/", { replace: true });
+
+    // 3. 后台静默发起剩余任务
+    const secondaryActions = ['tail', 'rubbing', 'blink'] as const;
+    try {
+      const tasks = secondaryActions.map(action => 
+        VolcanoService.submitTask(anchorFrame, ACTION_PROMPTS[action])
+      );
+      const taskResults = await Promise.all(tasks);
+      
+      const videoUrls: { [key: string]: string } = {};
+      const pollPromises = taskResults.map((task, index) => 
+        VolcanoService.pollTaskResult(task.id).then(url => {
+          videoUrls[secondaryActions[index]] = url;
+        })
+      );
+
+      await Promise.all(pollPromises);
+      // 更新猫咪信息并取消解锁标记
+      await FileManager.updateCatVideos(groupId, videoUrls, false);
+    } catch (e) {
+      console.error("后台生成任务失败:", e);
+      await FileManager.updateCatVideos(groupId, {}, false);
+    }
+  };
+
+  const handleStayBasic = async () => {
+    if (!idleVideoUrl) return;
+    
+    const groupId = 'group_' + Date.now();
+    const optimizedImg = anchorImage || image;
+
+    // 提取锚定帧作为占位
+    let anchorFrame;
+    try {
+      anchorFrame = await extractFrameFromUrl(idleVideoUrl, 0.1);
+    } catch (e) {
+      anchorFrame = optimizedImg;
+    }
+
+    await FileManager.downloadVideos(
+      { idle: idleVideoUrl }, 
+      groupId, 
+      name || breed || "我的 AI 猫咪", 
+      image || anchorImage || "",
+      { 
+        breed, 
+        furColor, 
+        source: image ? 'upload' : 'created', 
+        placeholderImage: anchorFrame,
+        anchorFrame: anchorFrame 
+      }
+    );
+
+    // 扣除积分
+    if (isRedemption && !isDebugRedemption) {
+      storage.deductPoints(redemptionAmount || 200, "解锁新伙伴");
+    }
+
+    storage.setActiveCatId(groupId);
+    refreshCatStatus();
+    navigate("/", { replace: true });
+  };
+
   useEffect(() => {
+    const checkConnectivity = async () => {
+      try {
+        await axios.get('/api/health', { timeout: 5000 });
+        console.log("Server connectivity confirmed");
+      } catch (e) {
+        console.warn("Server connectivity check failed, but proceeding anyway...", e);
+      }
+    };
+    checkConnectivity();
+
     if (!image && (!breed || !furColor)) {
       navigate("/create-cat", { replace: true });
       return;
@@ -235,14 +294,20 @@ export default function GenerationProgress() {
 
           setAnchorImage(currentAnchor);
           setProgress(25);
-          setPhase('preview');
-          setStatus("形象已就绪，准备生成视频");
+          
+          // 自动进入 I2V 阶段，不再停留于图片预览
+          const controller = new AbortController();
+          i2vAbortRef.current = controller;
+          if (currentAnchor) startI2VPhase(currentAnchor, controller.signal);
         } else {
           setStatus("正在分析图片...");
           setProgress(25);
           setAnchorImage(image);
-          setPhase('preview');
-          setStatus("图片已就绪，准备生成视频");
+          
+          // 自动进入 I2V 阶段
+          const controller = new AbortController();
+          i2vAbortRef.current = controller;
+          startI2VPhase(image, controller.signal);
         }
       } catch (err: any) {
         if (err.message === "任务轮询已中止" || err.message === "任务中止") return;
@@ -275,6 +340,7 @@ export default function GenerationProgress() {
             key="error"
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col items-center"
           >
             <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6">
@@ -316,57 +382,12 @@ export default function GenerationProgress() {
               </button>
             </div>
           </motion.div>
-        ) : phase === 'preview' ? (
-          <motion.div 
-            key="preview"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-sm flex flex-col items-center"
-          >
-            <div className="relative w-64 h-64 mb-8 rounded-[40px] overflow-hidden shadow-2xl border-4 border-white">
-              <img 
-                src={anchorImage || ""} 
-                alt="Anchor" 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-              <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-bold text-white uppercase tracking-widest border border-white/20">
-                  形象锚点已生成
-                </span>
-              </div>
-            </div>
-
-            <h2 className="text-2xl font-black text-[#5D4037] mb-2">这就是它的样子！</h2>
-            <p className="text-sm text-[#5D4037]/60 mb-8 px-4 leading-relaxed">
-              我们已经成功构思出了小猫的形象。接下来，AI 将以此为基准，为你绘制 4 段生动的互动视频。
-            </p>
-
-            <button 
-              onClick={() => {
-                const controller = new AbortController();
-                i2vAbortRef.current = controller;
-                if (anchorImage) startI2VPhase(anchorImage, controller.signal);
-              }}
-              className="w-full py-4 bg-[#FF9D76] text-white rounded-full font-black text-lg shadow-xl shadow-[#FF9D76]/20 flex items-center justify-center gap-3 active:scale-95 transition-all"
-            >
-              开始生成互动视频
-              <ArrowRight size={20} />
-            </button>
-            
-            <button 
-              onClick={handleRetry}
-              className="mt-6 text-[#5D4037]/40 font-bold text-sm uppercase tracking-widest"
-            >
-              不满意？重新捏猫
-            </button>
-          </motion.div>
-        ) : (
+        ) : (phase === 't2i' || phase === 'i2v') ? (
           <motion.div 
             key="progress"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             className="w-full max-w-sm flex flex-col items-center"
           >
             {/* 猫爪加载动画 (模拟) */}
@@ -400,19 +421,14 @@ export default function GenerationProgress() {
 
             {/* 状态步骤列表 */}
             <div className="mt-12 w-full space-y-4 text-left">
-              <StatusStep label="分析图片特征" active={progress >= 20} done={progress > 20} />
-              <StatusStep label="注入 4 种灵魂技能" active={progress >= 50} done={progress > 50} />
-              <StatusStep label="渲染高清互动视频" active={progress >= 80} done={progress > 80} />
+              <StatusStep label="分析图片特征" active={progress >= 5} done={progress > 5} />
+              <StatusStep label="生成核心待机动作" active={progress >= 10} done={progress === 100} />
               <StatusStep label="同步到本地猫窝" active={progress >= 100} done={progress === 100} />
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 成功预览 - 全屏沉浸式 */}
-      <AnimatePresence>
-        {showSuccess && (
+        ) : phase === 'confirm' ? (
           <motion.div 
+            key="confirm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -420,53 +436,101 @@ export default function GenerationProgress() {
           >
             {/* 视频背景 */}
             <div className="absolute inset-0 z-0">
+              {/* 初始底图占位，防止视频加载时的黑屏 */}
+              <motion.div 
+                initial={{ opacity: 1 }}
+                animate={{ opacity: isVideoLoading ? 1 : 0 }}
+                className="absolute inset-0 z-10 bg-cover bg-center"
+                style={{ backgroundImage: `url(${anchorImage})` }}
+              >
+                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center">
+                  <Loader2 className="text-white animate-spin mb-4" size={48} />
+                  <p className="text-white font-bold">正在加载互动预览...</p>
+                </div>
+              </motion.div>
+
               <video 
-                src={storage.getActiveCat()?.videoPaths?.petting || storage.getActiveCat()?.videoPath}
+                ref={videoRef}
+                src={idleVideoUrl || ""}
                 autoPlay
-                loop
                 muted
                 playsInline
                 className="w-full h-full object-contain"
+                onCanPlay={() => {
+                  console.log("Video can play (direct)");
+                  setIsVideoLoading(false);
+                  videoRef.current?.play().catch(e => console.warn("Auto-play failed:", e));
+                }}
+                onError={(e) => {
+                  console.error("Video playback error (direct), trying proxy...", e);
+                  // If direct URL fails, try proxy as fallback
+                  if (idleVideoUrl && !videoRef.current?.src.includes('/api/proxy-video')) {
+                    const proxiedUrl = `/api/proxy-video?url=${encodeURIComponent(idleVideoUrl)}`;
+                    if (videoRef.current) videoRef.current.src = proxiedUrl;
+                  } else {
+                    setError("视频加载失败，请检查网络连接或重新尝试");
+                  }
+                }}
+                onEnded={() => {
+                  setLoopCount(prev => {
+                    const next = prev + 1;
+                    if (next >= 2) {
+                      setShowConfirmDialog(true);
+                      return next;
+                    }
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = 0;
+                      videoRef.current.play();
+                    }
+                    return next;
+                  });
+                }}
               />
               {/* 模糊底层补位 */}
               <div 
                 className="absolute inset-0 -z-10 bg-cover bg-center blur-3xl opacity-50"
-                style={{ backgroundImage: `url(${storage.getActiveCat()?.avatar})` }}
+                style={{ backgroundImage: `url(${anchorImage})` }}
               />
               <div className="absolute inset-0 bg-black/40"></div>
             </div>
 
-            {/* 成功信息浮层 - 半透明毛玻璃 */}
-            <motion.div 
-              initial={{ scale: 0.9, y: 20, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              className="relative z-10 bg-white/10 backdrop-blur-xl rounded-[40px] p-8 w-[85%] max-w-sm shadow-2xl text-center border border-white/20"
-            >
-              <div className="w-20 h-20 bg-[#FF9D76]/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <PartyPopper className="text-[#FF9D76]" size={40} />
-              </div>
-              
-              <h2 className="text-2xl font-black text-white mb-2">恭喜获得新伙伴！</h2>
-              <p className="text-sm text-white/80 mb-8 leading-relaxed">
-                你成功领养了 <span className="text-[#FF9D76] font-bold">{name || "小猫"}</span>，它已经在猫窝里等你啦～
-              </p>
-              
-              {isRedemption && (
-                <div className="bg-white/5 rounded-2xl p-4 mb-8 flex items-center justify-center gap-2 border border-white/10">
-                  <Coins size={16} className="text-[#FF9D76]" />
-                  <span className="text-xs font-bold text-[#FF9D76]">已消耗 {redemptionAmount || 200} 积分</span>
-                </div>
+            {/* 确认对话框 */}
+            <AnimatePresence>
+              {showConfirmDialog && (
+                <motion.div 
+                  initial={{ scale: 0.9, y: 20, opacity: 0 }}
+                  animate={{ scale: 1, y: 0, opacity: 1 }}
+                  className="relative z-10 bg-white/10 backdrop-blur-xl rounded-[40px] p-8 w-[85%] max-w-sm shadow-2xl text-center border border-white/20"
+                >
+                  <div className="w-20 h-20 bg-[#FF9D76]/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Sparkles className="text-[#FF9D76]" size={40} />
+                  </div>
+                  
+                  <h2 className="text-2xl font-black text-white mb-2">我是你的梦中情猫吗？</h2>
+                  <p className="text-sm text-white/80 mb-8 leading-relaxed">
+                    形象已初步锁定！是否还需要解锁我更多动作（摸头、踩奶、玩耍）？
+                  </p>
+                  
+                  <div className="flex flex-col gap-4">
+                    <button 
+                      onClick={handleUnlockAll}
+                      className="w-full py-4 bg-[#FF9D76] text-white rounded-2xl font-black shadow-lg shadow-[#FF9D76]/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      是，全部解锁
+                      <ArrowRight size={18} />
+                    </button>
+                    <button 
+                      onClick={handleStayBasic}
+                      className="w-full py-4 bg-white/10 text-white rounded-2xl font-bold border border-white/20 active:scale-95 transition-all"
+                    >
+                      否，就这样吧
+                    </button>
+                  </div>
+                </motion.div>
               )}
-
-              <button 
-                onClick={() => navigate("/", { replace: true })}
-                className="w-full py-4 bg-[#FF9D76] text-white rounded-2xl font-black shadow-lg shadow-[#FF9D76]/20 active:scale-95 transition-all"
-              >
-                立即去见它
-              </button>
-            </motion.div>
+            </AnimatePresence>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );

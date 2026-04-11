@@ -18,14 +18,19 @@ export interface CatInfo {
   source: 'created' | 'uploaded';
   videoPath?: string; // 默认视频路径 (Idle/Petting)
   videoPaths?: {
+    idle?: string;
+    tail?: string;
     rubbing?: string;
+    blink?: string;
+    // Keep old ones for compatibility if needed, but we'll use the new ones
     petting?: string;
-    longPress?: string; // 兼容旧数据
     feeding?: string;
     teasing?: string;
   };
   remoteVideoUrl?: string; // 视频远程路径 (Fallback)
   placeholderImage?: string; // 高画质静态占位图 (Base64)
+  anchorFrame?: string; // 两阶段生成中的锚定底图 (Base64)
+  isUnlocking?: boolean; // 是否正在后台解锁更多动作
 }
 
 export interface AppSettings {
@@ -640,6 +645,22 @@ export const storage = {
     const diaries = storage.getDiaries();
     const cleaned = diaries.map(d => ({ ...d, media: undefined }));
     storage.saveDiaries(cleaned);
+  },
+
+  deleteCatById: (id: string) => {
+    const list = storage.getCatList();
+    const updated = list.filter(c => c.id !== id);
+    storage.saveCatList(updated);
+    
+    const activeId = storage.getActiveCatId();
+    if (activeId === id) {
+      if (updated.length > 0) {
+        storage.setActiveCatId(updated[0].id);
+      } else {
+        storage.removeItem(getUserKey(USER_DATA_KEYS.ACTIVE_CAT_ID));
+      }
+    }
+    return updated;
   },
 
   deleteCat: () => {

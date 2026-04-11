@@ -18,7 +18,7 @@ export class FileManager {
     groupId: string, 
     catName: string, 
     avatarUrl: string,
-    metadata?: { breed?: string; furColor?: string; source?: 'upload' | 'created'; placeholderImage?: string }
+    metadata?: { breed?: string; furColor?: string; source?: 'upload' | 'created'; placeholderImage?: string; anchorFrame?: string }
   ): Promise<{ [key: string]: string }> {
     const finalPaths: { [key: string]: string } = {};
     
@@ -34,15 +34,42 @@ export class FileManager {
       color: metadata?.furColor || '未知',
       avatar: avatarUrl,
       source: metadata?.source === 'created' ? 'created' : 'uploaded',
-      videoPath: finalPaths.petting || Object.values(finalPaths)[0], // 默认使用摸头(休息)作为待机视频
+      videoPath: finalPaths.idle || finalPaths.petting || Object.values(finalPaths)[0], 
       videoPaths: finalPaths,
-      remoteVideoUrl: finalPaths.petting || Object.values(finalPaths)[0],
+      remoteVideoUrl: finalPaths.idle || finalPaths.petting || Object.values(finalPaths)[0],
       placeholderImage: metadata?.placeholderImage,
+      anchorFrame: metadata?.anchorFrame,
     };
 
     storage.saveCatInfo(newCat);
     
     return finalPaths;
+  }
+
+  /**
+   * 更新现有猫咪的视频数据
+   */
+  public static async updateCatVideos(
+    catId: string,
+    newVideoUrls: { [key: string]: string },
+    isUnlocking: boolean = false
+  ): Promise<void> {
+    const cat = storage.getCatById(catId);
+    if (!cat) return;
+
+    const updatedCat: CatInfo = {
+      ...cat,
+      videoPaths: {
+        ...cat.videoPaths,
+        ...newVideoUrls
+      },
+      isUnlocking
+    };
+
+    storage.saveCatInfo(updatedCat);
+    
+    // 触发自定义事件通知 UI 更新
+    window.dispatchEvent(new CustomEvent('cat-updated', { detail: { catId } }));
   }
 
   /**
