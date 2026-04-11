@@ -1,16 +1,16 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { BookOpen, Mail, Home, Star, User } from "lucide-react";
 import { motion } from "motion/react";
 import { useAuthContext } from "../../context/AuthContext";
 
-// Tab 页面同步 import — 核心高频页面，消除切换时的 Suspense loading
-import HomePage from "../../pages/Home";
-import DiaryPage from "../../pages/Diary";
-import TimeLettersPage from "../../pages/TimeLetters";
-import NotificationListPage from "../../pages/NotificationList";
-import PointsPage from "../../pages/Points";
-import ProfilePage from "../../pages/Profile";
+// 保留 lazy 加载以维持 code-splitting，减小首屏 JS 体积
+const HomePage = lazy(() => import("../../pages/Home"));
+const DiaryPage = lazy(() => import("../../pages/Diary"));
+const TimeLettersPage = lazy(() => import("../../pages/TimeLetters"));
+const NotificationListPage = lazy(() => import("../../pages/NotificationList"));
+const PointsPage = lazy(() => import("../../pages/Points"));
+const ProfilePage = lazy(() => import("../../pages/Profile"));
 
 export default function MainLayout() {
   const navigate = useNavigate();
@@ -35,6 +35,19 @@ export default function MainLayout() {
     setVisitedTabs(prev => new Set(prev).add(location.pathname));
   }, [location.pathname]);
 
+  // 首屏渲染后立即预加载所有 tab chunk（不等 idle/2s），确保用户切换时 chunk 已就绪
+  React.useEffect(() => {
+    // 微任务中触发，不阻塞首帧渲染但比 requestIdleCallback/setTimeout 更快完成
+    Promise.resolve().then(() => {
+      import("../../pages/Home");
+      import("../../pages/Diary");
+      import("../../pages/TimeLetters");
+      import("../../pages/NotificationList");
+      import("../../pages/Points");
+      import("../../pages/Profile");
+    });
+  }, []);
+
   // 模拟 IndexedStack，保持页面状态并消除切换跳动
   const renderPersistentTab = (path: string, Component: React.ComponentType) => {
     const isActive = location.pathname === path;
@@ -43,10 +56,10 @@ export default function MainLayout() {
     if (!hasBeenVisited) return null;
 
     return (
-      <motion.div 
+      <motion.div
         key={path}
         initial={false}
-        animate={{ 
+        animate={{
           opacity: isActive ? 1 : 0,
           zIndex: isActive ? 10 : -10,
           scale: isActive ? 1 : 0.98
@@ -55,15 +68,18 @@ export default function MainLayout() {
         className={`fixed inset-0 ${isActive ? '' : 'pointer-events-none'}`}
       >
         <div className="w-full h-full overflow-y-auto no-scrollbar bg-background">
-          <div 
+          <div
             className="min-h-full flex flex-col"
-            style={{ 
+            style={{
               paddingBottom: 'calc(env(safe-area-inset-bottom) + 5rem)',
               paddingLeft: 'env(safe-area-inset-left)',
               paddingRight: 'env(safe-area-inset-right)'
             }}
           >
-            <Component />
+            {/* 每个 tab 独立 Suspense，fallback 为空：chunk 未就绪时保持空白而非全屏 spinner */}
+            <Suspense fallback={null}>
+              <Component />
+            </Suspense>
           </div>
         </div>
       </motion.div>
@@ -83,7 +99,7 @@ export default function MainLayout() {
         transition={{ duration: 0.2, ease: "easeOut" }}
         className={`fixed inset-0 ${isHome ? '' : 'pointer-events-none'}`}
       >
-        {hasCat && <HomePage />}
+        {hasCat && <Suspense fallback={null}><HomePage /></Suspense>}
       </motion.div>
       
       {/* Keep Diary alive */}

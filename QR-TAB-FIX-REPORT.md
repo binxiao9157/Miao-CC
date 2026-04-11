@@ -8,10 +8,10 @@
 
 ## 问题总览
 
-| # | 问题 | 表现 | 根因 |
-|---|------|------|------|
-| 1 | 二维码无法保存 | 提示"保存失败，请尝试截屏保存" | html2canvas 对 motion.div 截图失败 + 跨域图片 allowTaint:false 报错 |
-| 2 | Tab 切换 loading 圆圈 | 首次打开切换页面时出现旋转加载动画 | 6 个 tab 页用 lazy() 加载，首次切换触发 Suspense fallback |
+| # | 问题 | 表现 | 根因 | 最终方案 |
+|---|------|------|------|----------|
+| 1 | 二维码无法保存 | 提示"保存失败，请尝试截屏保存" | html2canvas 对 motion.div + 跨域图片 + 复杂 DOM 截图不稳定 | 移除 html2canvas，纯 Canvas 2D 手绘名片图 |
+| 2 | Tab 切换 loading 圆圈 | 首次打开切换页面时出现旋转加载动画 | lazy() 加载 + 共享 Suspense fallback | 保留 lazy + 微任务预加载 + 独立 Suspense(null) |
 
 ---
 
@@ -22,20 +22,22 @@
 
 ### 根因分析
 
-html2canvas 进入 catch 抛出"保存失败"的原因链：
+html2canvas 多次尝试均失败的原因链：
 
-1. **motion.div 干扰截图** — QR 卡片容器是 `motion.div`，带 `initial={{ opacity: 0, y: 20 }}` 入场动画。html2canvas 对 motion 内部的 transform/opacity 处理不稳定，可能截到空白或报错
-2. **跨域图片 + allowTaint:false** — 头像图片的 `toDataURL()` 转换失败后（CORS），html2canvas 用 `allowTaint: false` 渲染时遇到 tainted canvas 直接报错
-3. **预渲染时机过早** — 500ms 延迟可能不足以等待 motion 动画完成，预渲染失败后 cachedImageRef 为 null，实时渲染时同样遇到上述问题
+1. **motion.div 干扰截图** — QR 卡片容器被 motion.div 包裹，html2canvas 对 transform/opacity 动画元素截图不稳定
+2. **跨域图片** — 头像图片跨域导致 canvas tainted，无论 allowTaint 设置如何都可能失败
+3. **html2canvas 本身不稳定** — 对复杂 DOM 结构（圆角、渐变、嵌套裁剪）的兼容性差
 
-### 修复内容
+### 修复内容（最终方案：移除 html2canvas，纯 Canvas 2D 绘制）
 
 | 改动 | 说明 |
 |------|------|
-| motion.div → div 拆分 | 外层 `motion.div` 负责入场动画，内层普通 `div` 挂载 ref 供截图 |
-| allowTaint: true | 预渲染 + 实时渲染两处都改为 `true`，容忍跨域图片不报错 |
-| 预渲染延迟 1500ms | 从 500ms 增加到 1500ms，确保动画完成 + DOM 稳定后再截图 |
-| Blob URL 下载 | `<a download>` 从 data URL 改为 Blob URL，兼容更多浏览器 |
+| 移除 html2canvas 依赖 | 完全不依赖第三方截图库，消除所有 html2canvas 相关问题 |
+| 纯 Canvas 2D 绘制名片 | `renderCardToCanvas()` 手动绘制背景、头像、文字、QR码等全部元素 |
+| QR 码直接从 DOM 拷贝 | `qrCardRef.current?.querySelector('canvas')` 获取 QRCodeCanvas 渲染的 canvas 元素 |
+| 头像加载容错 | `loadImage()` 跨域失败返回 null，`drawCircleAvatar()` 自动绘制 emoji 占位符 |
+| 3 倍缩放高清输出 | 320×480 → 960×1440 像素，保证保存图片清晰度 |
+| 三级下载降级 | Web Share API → `<a download>` Blob URL → 长按保存预览 |
 
 ---
 
@@ -62,11 +64,11 @@ chunk 下载完成 → spinner 消失，页面渲染
 
 | 改动 | 说明 |
 |------|------|
-| lazy → 同步 import | 6 个 tab 页（Home/Diary/TimeLetters/NotificationList/Points/Profile）改为同步 import |
-| 删除预加载 useEffect | lazy 已移除，预加载逻辑不再需要 |
-| 移除 Suspense 包裹 | tab 页面不再 suspend，Suspense 边界无用 |
+| 保留 lazy() | 维持 code-splitting，首屏只下载当前 tab 代码，不牺牲初始加载速度 |
+| 预加载提前到微任务 | `requestIdleCallback/setTimeout(2s)` → `Promise.resolve().then()`，首帧渲染后立即触发 |
+| 独立 Suspense(fallback=null) | 共享全屏 spinner → 每个 tab 独立 Suspense，chunk 未就绪时保持空白而非全屏动画 |
 
-**Trade-off:** 首屏 JS bundle 略增（6 个 tab 页合并到主包），但这些是核心高频页面，数量有限，换来的是零延迟 tab 切换体验。
+**策略:** 保留 code-splitting 优势 + 立即预加载确保 chunk 快速就绪 + 独立 Suspense 消除全屏 spinner 视觉干扰。
 
 ---
 
@@ -74,14 +76,15 @@ chunk 下载完成 → spinner 消失，页面渲染
 
 | 文件 | 改动 |
 |------|------|
-| `src/pages/AddFriendQR.tsx` | motion.div 拆分 + allowTaint + Blob URL + 延迟调整 |
-| `src/components/layout/MainLayout.tsx` | lazy → 同步 import, 去 Suspense + 预加载 |
+| `src/pages/AddFriendQR.tsx` | 移除 html2canvas，纯 Canvas 2D 绘制名片 + 三级下载降级 |
+| `src/components/layout/MainLayout.tsx` | 保留 lazy + 微任务预加载 + 独立 Suspense(fallback=null) |
 
 ## 分步 Diff 文件
 
 | 文件 | 说明 |
 |------|------|
-| `patches/fix-qr-save.diff.txt` | Step 1: 二维码保存修复 |
+| `patches/fix-qr-save.diff.txt` | Step 1: 二维码保存修复（html2canvas 阶段，已废弃） |
+| `patches/fix-qr-save-canvas.diff.txt` | Step 1 最终版: 纯 Canvas 2D 绘制（移除 html2canvas） |
 | `patches/fix-tab-loading.diff.txt` | Step 2: Tab loading 消除 |
 | `qr-tab-fix.diff` | 完整 diff 备份 |
 

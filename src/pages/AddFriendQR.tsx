@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from "motion/react";
 import PageHeader from "../components/PageHeader";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { storage } from "../services/storage";
-import html2canvas from "html2canvas";
 
 export default function AddFriendQR() {
   const location = useLocation();
@@ -32,109 +31,169 @@ export default function AddFriendQR() {
     };
   }, []);
 
-  // 页面空闲时预渲染 QR 卡片图，加速后续保存操作
-  useEffect(() => {
-    const prerender = async () => {
-      if (!qrCardRef.current) return;
-      try {
-        const canvas = await html2canvas(qrCardRef.current, {
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#FFFFFF',
-          scale: 2,
-          logging: false,
-        });
-        cachedImageRef.current = canvas.toDataURL("image/png");
-      } catch (e) {
-        // 预渲染失败不影响功能，保存时会重新渲染
-      }
-    };
-    // 延迟到页面渲染完成后再执行
-    const timer = setTimeout(() => {
-      if ('requestIdleCallback' in window) {
-        (window as any).requestIdleCallback(prerender);
-      } else {
-        prerender();
-      }
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [cat, user]);
-
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
-  const cachedImageRef = useRef<string | null>(null);
 
-  // 将图片 URL 转换为 DataURL 以规避 html2canvas 的跨域限制
-  const toDataURL = (url: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
+  // 加载图片为 HTMLImageElement，跨域失败时返回 null
+  const loadImage = (src: string): Promise<HTMLImageElement | null> => {
+    return new Promise((resolve) => {
+      if (!src || src.startsWith('image/svg')) { resolve(null); return; }
       const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/png'));
-        } else {
-          reject(new Error('Failed to get canvas context'));
-        }
-      };
-      img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
-      img.src = url;
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
     });
   };
 
-  // 保存图片功能 — 三级降级：Web Share → <a download> → 长按保存
+  // 在 canvas 上绘制圆形裁剪的头像
+  const drawCircleAvatar = (ctx: CanvasRenderingContext2D, img: HTMLImageElement | null, x: number, y: number, r: number, fallbackText: string) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    if (img) {
+      ctx.drawImage(img, x, y, r * 2, r * 2);
+    } else {
+      ctx.fillStyle = '#FEF6F0';
+      ctx.fillRect(x, y, r * 2, r * 2);
+      ctx.fillStyle = '#D99B7A';
+      ctx.font = `${r}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(fallbackText, x + r, y + r);
+    }
+    ctx.restore();
+  };
+
+  // 纯 Canvas 2D 绘制名片图 — 完全不依赖 html2canvas
+  const renderCardToCanvas = async (): Promise<string> => {
+    const S = 3; // 缩放倍率
+    const W = 320 * S, H = 480 * S;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d')!;
+
+    // 背景
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+
+    // 顶部渐变装饰条
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#D99B7A');
+    grad.addColorStop(1, '#F5C5A3');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = 0.2;
+    ctx.fillRect(0, 0, W, 5 * S);
+    ctx.globalAlpha = 1;
+
+    // 加载头像
+    const [avatarImg, catAvatarImg] = await Promise.all([
+      loadImage(user?.avatar || ''),
+      loadImage(cat?.avatar || ''),
+    ]);
+
+    // 用户头像 (圆形)
+    const avatarR = 28 * S;
+    drawCircleAvatar(ctx, avatarImg, 24 * S, 24 * S, avatarR, '😺');
+
+    // 用户昵称
+    ctx.fillStyle = '#1C1B1F';
+    ctx.font = `bold ${18 * S}px -apple-system, "Helvetica Neue", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(user?.nickname || '', (24 + 56 + 12) * S, 28 * S);
+
+    // 副标题
+    ctx.fillStyle = '#79747E';
+    ctx.font = `bold ${10 * S}px -apple-system, "Helvetica Neue", sans-serif`;
+    ctx.fillText('邀请你成为好友', (24 + 56 + 12) * S, (28 + 24) * S);
+
+    // QR 码 — 直接从页面中 QRCodeCanvas 渲染的 <canvas> 拷贝
+    const qrCanvas = qrCardRef.current?.querySelector('canvas');
+    const qrSize = 200 * S;
+    const qrX = (W - qrSize) / 2;
+    const qrY = 100 * S;
+
+    // QR 背景区域
+    ctx.fillStyle = '#F5F0EB';
+    const bgPad = 20 * S;
+    ctx.beginPath();
+    const bgX = qrX - bgPad, bgY = qrY - bgPad, bgW = qrSize + bgPad * 2, bgH = qrSize + bgPad * 2, bgR = 28 * S;
+    ctx.moveTo(bgX + bgR, bgY);
+    ctx.arcTo(bgX + bgW, bgY, bgX + bgW, bgY + bgH, bgR);
+    ctx.arcTo(bgX + bgW, bgY + bgH, bgX, bgY + bgH, bgR);
+    ctx.arcTo(bgX, bgY + bgH, bgX, bgY, bgR);
+    ctx.arcTo(bgX, bgY, bgX + bgW, bgY, bgR);
+    ctx.closePath();
+    ctx.fill();
+
+    // QR 白底
+    ctx.fillStyle = '#FFFFFF';
+    const qrPad = 8 * S;
+    ctx.fillRect(qrX - qrPad, qrY - qrPad, qrSize + qrPad * 2, qrSize + qrPad * 2);
+
+    if (qrCanvas) {
+      ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
+    }
+
+    // 猫咪信息栏
+    const catY = qrY + qrSize + bgPad + 20 * S;
+    ctx.fillStyle = 'rgba(217, 155, 122, 0.05)';
+    const catBarX = 40 * S, catBarW = W - 80 * S, catBarH = 36 * S, catBarR = 12 * S;
+    ctx.beginPath();
+    ctx.moveTo(catBarX + catBarR, catY);
+    ctx.arcTo(catBarX + catBarW, catY, catBarX + catBarW, catY + catBarH, catBarR);
+    ctx.arcTo(catBarX + catBarW, catY + catBarH, catBarX, catY + catBarH, catBarR);
+    ctx.arcTo(catBarX, catY + catBarH, catBarX, catY, catBarR);
+    ctx.arcTo(catBarX, catY, catBarX + catBarW, catY, catBarR);
+    ctx.closePath();
+    ctx.fill();
+
+    // 猫咪头像
+    const catR = 14 * S;
+    drawCircleAvatar(ctx, catAvatarImg, (catBarX + 10 * S), catY + (catBarH - catR * 2) / 2, catR, '🐱');
+
+    // 猫咪名字
+    ctx.fillStyle = '#D99B7A';
+    ctx.font = `bold ${12 * S}px -apple-system, "Helvetica Neue", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`代表猫咪：${cat?.name || ''}`, catBarX + 10 * S + catR * 2 + 10 * S, catY + catBarH / 2);
+
+    // 底部提示文字
+    ctx.fillStyle = '#79747E';
+    ctx.globalAlpha = 0.6;
+    ctx.font = `${10 * S}px -apple-system, "Helvetica Neue", sans-serif`;
+    ctx.textAlign = 'center';
+    const footY = catY + catBarH + 24 * S;
+    ctx.fillText('让好友打开 Miao 扫描上方二维码', W / 2, footY);
+    ctx.fillText('即可建立跨时空的温暖连接', W / 2, footY + 16 * S);
+    ctx.globalAlpha = 1;
+
+    return canvas.toDataURL('image/png');
+  };
+
+  // 保存图片 — 纯 Canvas 绘制，不依赖 html2canvas
   const handleSaveImage = async () => {
-    if (!qrCardRef.current || isSaving) return;
+    if (isSaving) return;
 
     try {
       setIsSaving(true);
-
-      // 优先使用预渲染缓存，无缓存时实时渲染
-      let dataUrl = cachedImageRef.current;
-      if (!dataUrl) {
-        const images = qrCardRef.current.querySelectorAll('img');
-        const originalSrcs: string[] = [];
-        try {
-          for (let i = 0; i < images.length; i++) {
-            const img = images[i];
-            originalSrcs.push(img.src);
-            const converted = await toDataURL(img.src);
-            img.src = converted;
-          }
-        } catch (e) {
-          console.warn("图片转换 DataURL 失败，尝试直接截图:", e);
-        }
-
-        const canvas = await html2canvas(qrCardRef.current, {
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#FFFFFF',
-          scale: 3,
-          logging: false,
-        });
-
-        images.forEach((img, i) => {
-          if (originalSrcs[i]) img.src = originalSrcs[i];
-        });
-        dataUrl = canvas.toDataURL("image/png");
-        cachedImageRef.current = dataUrl;
-      }
-
+      const dataUrl = await renderCardToCanvas();
       const fileName = `Miao_Card_${user?.nickname || 'friend'}.png`;
 
-      // Stage 1: Web Share API (移动端原生分享)
+      // Stage 1: Web Share API
       if (navigator.canShare && navigator.share) {
         try {
-          const response = await fetch(dataUrl);
-          const blob = await response.blob();
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
           const file = new File([blob], fileName, { type: 'image/png' });
           if (navigator.canShare({ files: [file] })) {
             await navigator.share({ files: [file], title: '保存名片' });
@@ -142,11 +201,11 @@ export default function AddFriendQR() {
             return;
           }
         } catch (e) {
-          console.warn("Web Share 文件分享失败:", e);
+          console.warn("Web Share 失败:", e);
         }
       }
 
-      // Stage 2: <a download> + Blob URL 触发浏览器下载
+      // Stage 2: <a download> + Blob URL
       try {
         const res = await fetch(dataUrl);
         const blob = await res.blob();
@@ -157,14 +216,14 @@ export default function AddFriendQR() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
         showToast("图片已保存到下载目录");
         return;
       } catch (e) {
-        console.warn("<a download> 下载失败:", e);
+        console.warn("<a download> 失败:", e);
       }
 
-      // Stage 3: 长按保存预览图 (最终兜底)
+      // Stage 3: 长按保存
       setGeneratedImageUrl(dataUrl);
       showToast("请长按图片保存到相册");
 
