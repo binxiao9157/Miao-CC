@@ -1,22 +1,37 @@
 # 0411 代码修复说明
 
 > 日期: 2026-04-11  
-> 范围: M 批次（中优先级）+ L 批次（低优先级）  
-> 涉及文件: 8 个，82 行增 / 92 行删
+> 范围: H 批次（高优先级）+ M 批次（中优先级）+ L 批次（低优先级）  
+> 涉及文件: 8 个
 
 ---
 
 ## 修复总览
 
-| 编号 | 优先级 | 问题描述 | 状态 |
-|------|--------|----------|------|
-| M1 | 中 | 前端通过 HTTP header 泄露 API Key 到服务端 | 已修复 |
-| M2 | 中 | setTimeout 返回值未清理，组件卸载后触发 setState | 已修复 |
-| M3 | 中 | catch 块静默吞错误，异常无日志输出 | 已修复 |
-| M5 | 中 | localStorage 跨 tab 不同步，内存缓存过期 | 已修复 |
-| M7 | 中 | action 视频 preload="auto" 浪费移动端带宽 | 已修复 |
-| M8 | 中 | 关键交互按钮缺少 aria-label 无障碍标签 | 已修复 |
-| L1/L5 | 低 | Welcome.tsx 引用已删除的 VolcanoConfig 字段导致运行时错误 | 已修复 |
+### H 级别（高优先级）
+
+| 编号 | 问题描述 | 状态 |
+|------|----------|------|
+| H-01 | 无 API 限流，存在 DoS 风险 | 已修复 |
+| H-02 | 错误响应泄露上游敏感信息（errorMessage 明文返回） | 已修复 |
+| H-* | uncaughtException 中 process.exit(1) 导致服务崩溃 | 已修复 |
+
+### M 级别（中优先级）
+
+| 编号 | 问题描述 | 状态 |
+|------|----------|------|
+| M1 | 前端通过 HTTP header 泄露 API Key 到服务端 | 已修复 |
+| M2 | setTimeout 返回值未清理，组件卸载后触发 setState | 已修复 |
+| M3 | catch 块静默吞错误，异常无日志输出 | 已修复 |
+| M5 | localStorage 跨 tab 不同步，内存缓存过期 | 已修复 |
+| M7 | action 视频 preload="auto" 浪费移动端带宽 | 已修复 |
+| M8 | 关键交互按钮缺少 aria-label 无障碍标签 | 已修复 |
+
+### L 级别（低优先级）
+
+| 编号 | 问题描述 | 状态 |
+|------|----------|------|
+| L1/L5 | Welcome.tsx 引用已删除的 VolcanoConfig 字段导致运行时错误 | 已修复 |
 
 ---
 
@@ -96,23 +111,36 @@
 
 ---
 
+### Step 6: H-01 + H-02 — API 限流 & 错误信息泄露修复
+
+**文件**: `server.ts`  
+**diff**: `step6-H01H02-ratelimit-error-leak.diff`
+
+**问题**:
+- **H-01**: 所有 `/api/` 端点无任何限流保护，攻击者可无限制调用造成 DoS 或产生高额 API 费用
+- **H-02**: `sendError()` 兜底分支将上游 `errorMessage`（可能包含内部 URL、堆栈、模型 ID 等）原文返回给前端
+- **附加**: `process.on('uncaughtException')` 中 `process.exit(1)` 导致任何未捕获异常直接杀死进程
+
+**修复方案**:
+1. **限流中间件** — 基于 IP 的内存滑动窗口，每分钟 30 次上限，超出返回 429；定时清理过期条目防止内存泄漏
+2. **错误泄露** — `sendError()` 兜底 JSON 中 `message` 字段仅在 `NODE_ENV !== 'production'` 时返回，生产环境只返回 `defaultMessage`
+3. **uncaughtException** — 移除 `process.exit(1)`，改为仅日志记录，由进程管理器（pm2/docker）负责重启策略
+
+---
+
 ## 文件清单
 
 ```
 patches/0411/
-  README.md                                   -- 本文档
-  full-0411-all-fixes.diff                    -- 完整 diff（8 文件）
-  full-0411-all-fixes.txt                     -- txt 备份
-  step1-M1-api-key-security.diff              -- Step 1 diff
-  step1-M1-api-key-security.txt               -- Step 1 txt 备份
-  step2-M2M3-timer-cleanup-silent-catch.diff  -- Step 2 diff
-  step2-M2M3-timer-cleanup-silent-catch.txt   -- Step 2 txt 备份
-  step3-M5-cross-tab-sync.diff               -- Step 3 diff
-  step3-M5-cross-tab-sync.txt                -- Step 3 txt 备份
-  step4-M7M8-preload-aria.diff               -- Step 4 diff
-  step4-M7M8-preload-aria.txt                -- Step 4 txt 备份
-  step5-M8-pageheader-aria.diff              -- Step 5 diff
-  step5-M8-pageheader-aria.txt               -- Step 5 txt 备份
+  README.md                                        -- 本文档
+  full-0411-all-fixes.diff                         -- 完整 diff
+  full-0411-all-fixes.txt                          -- txt 备份
+  step1-M1-api-key-security.diff / .txt            -- API Key 安全加固
+  step2-M2M3-timer-cleanup-silent-catch.diff / .txt -- setTimeout + catch 修复
+  step3-M5-cross-tab-sync.diff / .txt              -- 跨 tab 缓存同步
+  step4-M7M8-preload-aria.diff / .txt              -- 预加载 + autoplay 注释
+  step5-M8-pageheader-aria.diff / .txt             -- PageHeader aria-label
+  step6-H01H02-ratelimit-error-leak.diff / .txt    -- 限流 + 错误泄露 + exit 修复
 ```
 
 ## 未修复项（需后续处理）
