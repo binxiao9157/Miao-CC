@@ -22,7 +22,6 @@ export default function Profile() {
       const cat = storage.getActiveCat();
       setActiveCat(cat);
       
-      // Calculate days since registration (mocked for now or based on first diary)
       const firstDiary = diaries.length > 0 ? diaries[diaries.length - 1] : null;
       const firstCreatedAt = firstDiary?.createdAt ? new Date(firstDiary.createdAt).getTime() : NaN;
       const days = (!isNaN(firstCreatedAt) && firstCreatedAt > 0)

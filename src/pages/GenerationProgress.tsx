@@ -154,7 +154,7 @@ export default function GenerationProgress() {
     // 标记为正在解锁
     await FileManager.updateCatVideos(groupId, {}, true);
 
-    // 积分已在 startI2VPhase 开头前置扣除，此处无需重复
+    // 积分扣除逻辑已提前至生成前执行
 
     storage.setActiveCatId(groupId);
     refreshCatStatus();
@@ -198,21 +198,9 @@ export default function GenerationProgress() {
       anchorFrame = optimizedImg;
     }
 
-    await FileManager.downloadVideos(
-      { idle: idleVideoUrl }, 
-      groupId, 
-      name || breed || "我的 AI 猫咪", 
-      image || anchorImage || "",
-      { 
-        breed, 
-        furColor, 
-        source: image ? 'upload' : 'created', 
-        placeholderImage: anchorFrame,
-        anchorFrame: anchorFrame 
-      }
-    );
+    await FileManager.updateCatVideos(groupId, { idle: idleVideoUrl }, false);
 
-    // 积分已在 startI2VPhase 开头前置扣除，此处无需重复
+    // 积分扣除逻辑已提前至生成前执行
 
     storage.setActiveCatId(groupId);
     refreshCatStatus();

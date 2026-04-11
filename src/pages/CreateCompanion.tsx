@@ -239,10 +239,8 @@ export default function CreateCompanion() {
               </>
             )}
           </button>
-          
         </div>
       </div>
-
     </div>
   );
 }

@@ -224,7 +224,7 @@ export default function AddFriendQR() {
     type: 'miao_friend_invite',
     uid: user.username,
     nickname: user.nickname,
-    catName: cat.name,
+    catName: cat?.name,
     timestamp: Date.now()
   }), [user.username, user.nickname, cat?.name]);
 

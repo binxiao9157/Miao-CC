@@ -235,7 +235,7 @@ export default function CatPlayer() {
         {/* 背景补位：使用模糊的头像或视频首帧填充 */}
         <div className="absolute inset-0 z-0">
           <img 
-            src={cat.avatar || ''}
+            src={cat.avatar || ''} 
             alt="" 
             className="w-full h-full object-cover opacity-30 blur-2xl"
             referrerPolicy="no-referrer"

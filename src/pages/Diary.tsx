@@ -246,13 +246,14 @@ export default function Diary() {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-
+            
             // 导出压缩后的 Base64 (JPEG 格式，质量 0.6)
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
             setSelectedMedia({ url: compressedBase64, type: 'image' });
           };
           img.src = reader.result as string;
         } else {
+          // 视频处理
           setSelectedMedia({ url: reader.result as string, type: 'video' });
         }
       };
