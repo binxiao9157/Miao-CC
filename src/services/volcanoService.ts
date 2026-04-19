@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API_BASE_URL } from '../config/api';
 
 /**
  * 火山引擎配置中心 (方舟 Ark 平台)
@@ -54,7 +55,7 @@ export class VolcanoService {
     let lastError: any;
     for (let i = 0; i <= retries; i++) {
       try {
-        const response = await axios.post("/api/generate-video", {
+        const response = await axios.post(`${API_BASE_URL}/api/generate-video`, {
           model: VolcanoConfig.ModelId,
           prompt: prompt || "A high quality video of this cat, cinematic lighting, realistic.",
           image_base64: imageBase64,
@@ -131,7 +132,7 @@ export class VolcanoService {
     }
 
     try {
-      const response = await axios.get(`/api/video-status/${taskId}`, {
+      const response = await axios.get(`${API_BASE_URL}/api/video-status/${taskId}`, {
         timeout: 60000, // Added 60 seconds timeout
         headers: buildHeaders()
       });
@@ -162,7 +163,7 @@ export class VolcanoService {
     }
 
     try {
-      const response = await axios.post("/api/generate-image", {
+      const response = await axios.post(`${API_BASE_URL}/api/generate-image`, {
         prompt,
         model: VolcanoConfig.T2IModelId
       }, {
@@ -212,7 +213,7 @@ export class VolcanoService {
       // 1. 网络请求（可重试）
       let result: any;
       try {
-        const response = await axios.get(`/api/image-status/${taskId}`, {
+        const response = await axios.get(`${API_BASE_URL}/api/image-status/${taskId}`, {
           headers: buildHeaders(),
           signal
         });

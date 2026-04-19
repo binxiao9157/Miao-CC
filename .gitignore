@@ -1,6 +1,11 @@
 node_modules/
 coverage/
+dist/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Capacitor native build artifacts
+android/app/build/
+ios/App/Pods/

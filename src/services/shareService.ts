@@ -1,6 +1,9 @@
 /**
  * 分享服务：支持 Web Share API、微信内置浏览器检测及兜底复制逻辑
+ * 在 Capacitor 原生环境中使用原生分享/剪贴板插件
  */
+
+import { isNative } from '../utils/platform';
 
 export interface ShareOptions {
   title: string;
@@ -29,6 +32,12 @@ export const shareService = {
    */
   copyToClipboard: async (text: string): Promise<boolean> => {
     try {
+      if (isNative()) {
+        const { Clipboard } = await import('@capacitor/clipboard');
+        await Clipboard.write({ string: text });
+        return true;
+      }
+
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
         return true;
@@ -56,9 +65,26 @@ export const shareService = {
    * 执行分享逻辑
    */
   share: async (options: ShareOptions): Promise<{ success: boolean; method: 'native' | 'wechat' | 'copy' }> => {
+    // Capacitor 原生分享
+    if (isNative()) {
+      try {
+        const { Share } = await import('@capacitor/share');
+        await Share.share({
+          title: options.title,
+          text: options.text,
+          url: options.url,
+          dialogTitle: options.title,
+        });
+        return { success: true, method: 'native' };
+      } catch (err) {
+        if ((err as Error).message?.includes('canceled')) {
+          return { success: false, method: 'native' };
+        }
+        console.error('原生分享失败:', err);
+      }
+    }
+
     // 1. 优先尝试系统原生分享 (Web Share API)
-    // 注意：WeChat 浏览器虽然支持 navigator.share，但通常会被拦截或表现不佳，
-    // 且用户在 WeChat 里更习惯右上角分享，所以 WeChat 环境优先走 WeChat 逻辑。
     if (shareService.isWeChat()) {
       return { success: true, method: 'wechat' };
     }

@@ -4,7 +4,9 @@
  */
 
 import React, { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useBackButton } from "./hooks/useBackButton";
+import { setupDeepLinks } from "./utils/deepLinks";
 // 使用 React.lazy 延迟加载所有页面和布局
 const MainLayout = lazy(() => import("./components/layout/MainLayout"));
 const Login = lazy(() => import("./pages/Login"));
@@ -44,6 +46,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+function NativeIntegration() {
+  const navigate = useNavigate();
+  useBackButton();
+  React.useEffect(() => { setupDeepLinks(navigate); }, [navigate]);
+  return null;
 }
 
 function AppRoutes() {
@@ -115,6 +124,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <NativeIntegration />
         <AppRoutes />
       </BrowserRouter>
     </AuthProvider>

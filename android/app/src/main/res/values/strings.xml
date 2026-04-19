@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Miao</string>
+    <string name="title_activity_main">Miao</string>
+    <string name="package_name">tech.mmdd10.miao</string>
+    <string name="custom_url_scheme">tech.mmdd10.miao</string>
+</resources>

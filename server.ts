@@ -3,6 +3,7 @@ import path from "path";
 import axios from "axios";
 import https from "https";
 import dotenv from "dotenv";
+import cors from "cors";
 import { fileURLToPath } from 'url';
 
 dotenv.config();
@@ -14,6 +15,15 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors({
+    origin: [
+      'http://localhost:3000',
+      'https://www.mmdd10.tech',
+      'capacitor://localhost',   // iOS Capacitor
+      'https://localhost',       // Android Capacitor
+    ],
+    credentials: true,
+  }));
   app.use(express.json({ limit: '50mb' }));
 
   const httpsAgent = new https.Agent({

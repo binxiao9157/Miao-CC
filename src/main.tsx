@@ -3,8 +3,12 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
+import { isNative } from './utils/platform';
+import { initNativePlugins } from './utils/nativeInit';
 
-if ('serviceWorker' in navigator) {
+initNativePlugins();
+
+if (!isNative() && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js').then(reg => {
       console.log('SW registered:', reg);
