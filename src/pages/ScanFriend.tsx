@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Html5Qrcode } from "html5-qrcode";
-import { ChevronLeft, Zap, Image as ImageIcon, QrCode, CheckCircle, AlertCircle, UserPlus, X, Sparkles } from "lucide-react";
+import { ChevronLeft, Zap, Image as ImageIcon, QrCode, CheckCircle, AlertCircle, UserPlus, X, Sparkles, Camera } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { storage, FriendInfo } from "../services/storage";
 import { QRCodeCanvas } from "qrcode.react";
+import { isNative } from "../utils/platform";
+import { scanQRFromCamera, scanQRFromGallery } from "../services/scannerService";
 
 export default function ScanFriend() {
   const navigate = useNavigate();
@@ -33,9 +35,26 @@ export default function ScanFriend() {
     }
   };
 
+  // 原生端：使用 Capacitor Camera 拍照后解码
+  const handleNativeScan = async (source: 'camera' | 'gallery') => {
+    try {
+      const result = source === 'camera' ? await scanQRFromCamera() : await scanQRFromGallery();
+      if (result) {
+        handleScanResult(result);
+      } else {
+        setError("未在图片中识别到二维码");
+        setTimeout(() => setError(null), 3000);
+      }
+    } catch (err: any) {
+      console.error("Native scan error:", err);
+      setError("扫码失败，请重试");
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
   const startScanner = async (isUnmounted = false) => {
-    if (isUnmounted) return;
-    
+    if (isUnmounted || isNative()) return;
+
     try {
       if (scannerRef.current) {
         try {
@@ -45,14 +64,14 @@ export default function ScanFriend() {
           console.warn("Scanner cleanup warning:", e);
         }
       }
-      
+
       stopTracks();
 
       const html5QrCode = new Html5Qrcode("reader");
       scannerRef.current = html5QrCode;
 
-      const config = { 
-        fps: 30, 
+      const config = {
+        fps: 30,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
           const qrboxSize = Math.floor(minEdge * 0.7);
@@ -257,51 +276,76 @@ export default function ScanFriend() {
     catAvatar: activeCat?.avatar || ''
   });
 
+  const nativeMode = isNative();
+
   return (
     <div className="fixed inset-0 bg-transparent overflow-hidden z-[100]">
-      <div 
-        id="reader" 
-        className="absolute inset-0 w-full h-full [&>video]:object-cover [&>video]:w-full [&>video]:h-full [&>div]:!hidden [&>span]:!hidden [&>canvas]:!hidden [&>video]:!block"
-      ></div>
-      
-      <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden">
-        <motion.div 
-          initial={{ top: "25%", opacity: 0 }}
-          animate={{ 
-            top: ["25%", "75%"],
-            opacity: [0, 1, 1, 0]
-          }}
-          transition={{ 
-            duration: 2.2, 
-            repeat: Infinity, 
-            times: [0, 0.1, 0.9, 1],
-            ease: "linear" 
-          }}
-          className="absolute left-[12.5%] right-[12.5%] h-[60px] pointer-events-none"
-        >
-          {/* 支付宝式网格光晕 (Advanced Grid Glow Effect) */}
-          <div className="absolute inset-0 overflow-hidden">
-            <div 
-              className="absolute inset-0 bg-gradient-to-t from-[#FF9D76]/60 to-transparent"
-              style={{
-                backgroundImage: `
-                  linear-gradient(to top, rgba(255,157,118,0.6), transparent),
-                  linear-gradient(to right, rgba(255,157,118,0.25) 1px, transparent 1px),
-                  linear-gradient(to bottom, rgba(255,157,118,0.25) 1px, transparent 1px)
-                `,
-                backgroundSize: '100% 100%, 2px 2px, 2px 2px'
-              }}
-            />
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#FF9D76] shadow-[0_0_15px_#FF9D76] rounded-full" />
-        </motion.div>
+      {/* Web: 实时摄像头扫描区域 */}
+      {!nativeMode && (
+        <div
+          id="reader"
+          className="absolute inset-0 w-full h-full [&>video]:object-cover [&>video]:w-full [&>video]:h-full [&>div]:!hidden [&>span]:!hidden [&>canvas]:!hidden [&>video]:!block"
+        ></div>
+      )}
+      {/* 隐藏的 QR 解码容器（原生端使用） */}
+      <div id="__qr-decode-tmp" className="hidden"></div>
 
-        <div className="absolute w-full text-center bottom-[20%]">
-          <p className="text-white/60 text-[13px] font-medium tracking-widest drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
-            将二维码/条码放入区域内，即可自动扫描
-          </p>
+      {/* Native: 点击扫码的简洁界面 */}
+      {nativeMode && (
+        <div className="absolute inset-0 bg-gradient-to-b from-[#2D1B14] to-[#1A0E09] flex flex-col items-center justify-center gap-8">
+          <div className="text-center mb-4">
+            <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-2">Scan QR Code</p>
+            <p className="text-white/60 text-sm">点击下方按钮拍照识别二维码</p>
+          </div>
+          <button
+            onClick={() => handleNativeScan('camera')}
+            className="w-32 h-32 rounded-full bg-[#FF9D76]/20 border-4 border-[#FF9D76]/40 flex items-center justify-center text-[#FF9D76] active:scale-90 transition-all shadow-2xl shadow-[#FF9D76]/20"
+          >
+            <Camera size={48} strokeWidth={1.5} />
+          </button>
         </div>
-      </div>
+      )}
+
+      {!nativeMode && (
+        <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden">
+          <motion.div
+            initial={{ top: "25%", opacity: 0 }}
+            animate={{
+              top: ["25%", "75%"],
+              opacity: [0, 1, 1, 0]
+            }}
+            transition={{
+              duration: 2.2,
+              repeat: Infinity,
+              times: [0, 0.1, 0.9, 1],
+              ease: "linear"
+            }}
+            className="absolute left-[12.5%] right-[12.5%] h-[60px] pointer-events-none"
+          >
+            {/* 支付宝式网格光晕 (Advanced Grid Glow Effect) */}
+            <div className="absolute inset-0 overflow-hidden">
+              <div
+                className="absolute inset-0 bg-gradient-to-t from-[#FF9D76]/60 to-transparent"
+                style={{
+                  backgroundImage: `
+                    linear-gradient(to top, rgba(255,157,118,0.6), transparent),
+                    linear-gradient(to right, rgba(255,157,118,0.25) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255,157,118,0.25) 1px, transparent 1px)
+                  `,
+                  backgroundSize: '100% 100%, 2px 2px, 2px 2px'
+                }}
+              />
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#FF9D76] shadow-[0_0_15px_#FF9D76] rounded-full" />
+          </motion.div>
+
+          <div className="absolute w-full text-center bottom-[20%]">
+            <p className="text-white/60 text-[13px] font-medium tracking-widest drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+              将二维码/条码放入区域内，即可自动扫描
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="absolute inset-0 z-20 flex flex-col pointer-events-none">
         <div 
@@ -322,8 +366,8 @@ export default function ScanFriend() {
           className="w-full flex justify-center gap-10 items-center pb-16 px-6 pointer-events-auto"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 3rem)' }}
         >
-          <button 
-            onClick={handleAlbumClick}
+          <button
+            onClick={nativeMode ? () => handleNativeScan('gallery') : handleAlbumClick}
             className="flex flex-col items-center gap-2 group"
           >
             <div className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white group-active:scale-90 transition-all shadow-lg">
@@ -331,13 +375,15 @@ export default function ScanFriend() {
             </div>
             <span className="text-[10px] font-bold text-white tracking-widest drop-shadow-md">相册</span>
           </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            hidden 
-            accept="image/*" 
-            onChange={handleFileChange} 
-          />
+          {!nativeMode && (
+            <input
+              type="file"
+              ref={fileInputRef}
+              hidden
+              accept="image/*"
+              onChange={handleFileChange}
+            />
+          )}
 
           <button 
             onClick={async () => {
@@ -360,15 +406,17 @@ export default function ScanFriend() {
             <span className="text-[10px] font-bold text-white tracking-widest drop-shadow-md">我的二维码</span>
           </button>
 
-          <button 
-            onClick={toggleFlash}
-            className="flex flex-col items-center gap-2 group"
-          >
-            <div className={`w-14 h-14 rounded-full backdrop-blur-md border border-white/10 flex items-center justify-center transition-all group-active:scale-90 shadow-lg ${isFlashOn ? 'bg-white text-[#FF9D76]' : 'bg-white/10 text-white'}`}>
-              <Zap size={24} strokeWidth={1.5} fill={isFlashOn ? "currentColor" : "none"} />
-            </div>
-            <span className="text-[10px] font-bold text-white tracking-widest drop-shadow-md">手电筒</span>
-          </button>
+          {!nativeMode && (
+            <button
+              onClick={toggleFlash}
+              className="flex flex-col items-center gap-2 group"
+            >
+              <div className={`w-14 h-14 rounded-full backdrop-blur-md border border-white/10 flex items-center justify-center transition-all group-active:scale-90 shadow-lg ${isFlashOn ? 'bg-white text-[#FF9D76]' : 'bg-white/10 text-white'}`}>
+                <Zap size={24} strokeWidth={1.5} fill={isFlashOn ? "currentColor" : "none"} />
+              </div>
+              <span className="text-[10px] font-bold text-white tracking-widest drop-shadow-md">手电筒</span>
+            </button>
+          )}
         </div>
       </div>
 

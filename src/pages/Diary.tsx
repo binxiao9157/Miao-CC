@@ -10,6 +10,8 @@ import { shareService } from "../services/shareService";
 import PageHeader from "../components/PageHeader";
 import { mediaStorage } from "../services/mediaStorage";
 import { mockFriendService } from "../services/mockFriendService";
+import { isNative } from "../utils/platform";
+import { pickImage } from "../services/cameraService";
 
 export default function Diary() {
   const { user } = useAuthContext();
@@ -586,26 +588,36 @@ export default function Diary() {
               {/* 弹窗底部操作栏 (固定) */}
               <div className="flex items-center justify-between p-6 pt-4 border-t border-outline-variant/30 shrink-0 bg-background">
                 <div className="flex gap-3">
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
+                  <button
+                    onClick={async () => {
+                      if (isNative()) {
+                        const dataUrl = await pickImage('gallery');
+                        if (dataUrl) {
+                          if (selectedMedia?.url?.startsWith('blob:')) URL.revokeObjectURL(selectedMedia.url);
+                          setSelectedMedia({ url: dataUrl, type: 'image' });
+                        }
+                      } else {
+                        fileInputRef.current?.click();
+                      }
+                    }}
                     className="w-12 h-12 bg-surface-container rounded-2xl flex items-center justify-center text-on-surface-variant hover:text-primary transition-all active:scale-90"
                     title="上传图片"
                   >
                     <ImageIcon size={24} />
                   </button>
-                  <button 
+                  <button
                     onClick={() => fileInputRef.current?.click()}
                     className="w-12 h-12 bg-surface-container rounded-2xl flex items-center justify-center text-on-surface-variant hover:text-primary transition-all active:scale-90"
                     title="上传视频"
                   >
                     <Video size={24} />
                   </button>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    hidden 
-                    accept="image/*,video/*" 
-                    onChange={handleFileChange} 
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    hidden
+                    accept="image/*,video/*"
+                    onChange={handleFileChange}
                   />
                 </div>
                 {/* [FIX] 发布按钮位置：确保在右下角，并使用品牌色 */}

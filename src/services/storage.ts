@@ -1,7 +1,11 @@
 import { mediaStorage } from "./mediaStorage";
+import { nativeStorage } from "./nativeStorage";
+import { isNative } from "../utils/platform";
 
 /**
  * 本地存储服务，模拟移动端的 SharedPreferences/MMKV
+ * 原生环境下，auth token 和当前用户信息额外写入 Capacitor Preferences
+ * 确保 WebView 缓存被清除时不丢失登录态
  */
 
 export interface UserInfo {
@@ -147,6 +151,32 @@ const USER_DATA_KEYS = {
 const MAX_DIARIES = 200;
 const MAX_FRIEND_DIARIES = 100;
 const MAX_TIME_LETTERS = 100;
+
+// ---- 原生存储关键 key（仅 auth token + 当前用户同步到 Capacitor Preferences）----
+const NATIVE_KEYS = [STORAGE_KEYS.TOKEN, STORAGE_KEYS.CURRENT_USER, STORAGE_KEYS.LAST_USERNAME] as const;
+
+/** 启动时从 Capacitor Preferences 恢复关键数据到 localStorage（WebView 缓存可能被系统清除） */
+export async function initNativeStorage(): Promise<void> {
+  if (!isNative()) return;
+  for (const key of NATIVE_KEYS) {
+    const value = await nativeStorage.getItem(key);
+    if (value !== null) {
+      try { localStorage.setItem(key, value); } catch {}
+    }
+  }
+  // 恢复后刷新内存缓存
+  cachedCurrentUserRaw = null;
+  memCache.clear();
+  refreshUserPrefix();
+}
+
+// fire-and-forget 写入原生存储（不阻塞同步调用链）
+function nativePut(key: string, value: string) {
+  if (isNative()) nativeStorage.setItem(key, value).catch(() => {});
+}
+function nativeDel(key: string) {
+  if (isNative()) nativeStorage.removeItem(key).catch(() => {});
+}
 
 // 内部缓存，减少频繁的 JSON.parse
 let cachedUserPrefix: string = 'guest';
@@ -330,14 +360,18 @@ export const storage = {
   // 用户管理
   saveUserInfo: (info: UserInfo) => {
     // 1. 保存到当前登录用户
-    storage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(info));
+    const infoJson = JSON.stringify(info);
+    storage.setItem(STORAGE_KEYS.CURRENT_USER, infoJson);
     invalidateCache(STORAGE_KEYS.CURRENT_USER);
     storage.setItem(STORAGE_KEYS.LAST_USERNAME, info.username);
+
+    // 同步到原生存储（防止 WebView 缓存丢失）
+    nativePut(STORAGE_KEYS.CURRENT_USER, infoJson);
+    nativePut(STORAGE_KEYS.LAST_USERNAME, info.username);
 
     // 刷新前缀缓存
     refreshUserPrefix();
 
-    
     // 2. 保存到用户列表（模拟数据库）
     const users = storage.safeParse<UserInfo[]>(STORAGE_KEYS.USERS, []);
     const index = users.findIndex(u => u.username === info.username);
@@ -394,8 +428,9 @@ export const storage = {
   
   saveToken: (token: string) => {
     storage.setItem(STORAGE_KEYS.TOKEN, token);
+    nativePut(STORAGE_KEYS.TOKEN, token);
   },
-  
+
   getToken: () => {
     try {
       return localStorage.getItem(STORAGE_KEYS.TOKEN);
@@ -403,9 +438,10 @@ export const storage = {
       return null;
     }
   },
-  
+
   removeToken: () => {
     storage.removeItem(STORAGE_KEYS.TOKEN);
+    nativeDel(STORAGE_KEYS.TOKEN);
   },
 
   saveLoginTime: (time: number) => {
@@ -432,6 +468,9 @@ export const storage = {
     storage.removeItem(STORAGE_KEYS.TOKEN);
     localStorage.removeItem('miao_login_time');
     localStorage.removeItem('miao_last_active_time');
+    // 同步清除原生存储
+    nativeDel(STORAGE_KEYS.CURRENT_USER);
+    nativeDel(STORAGE_KEYS.TOKEN);
     refreshUserPrefix();
   },
   

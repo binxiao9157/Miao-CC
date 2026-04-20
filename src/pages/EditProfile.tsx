@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Camera, Check, Image as ImageIcon, X } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { motion, AnimatePresence } from "motion/react";
+import { isNative } from "../utils/platform";
+import { pickImage } from "../services/cameraService";
 
 export default function EditProfile() {
   const navigate = useNavigate();
@@ -78,15 +80,53 @@ export default function EditProfile() {
     }
   };
 
-  const triggerFilePicker = () => {
+  const triggerFilePicker = async () => {
+    if (isNative()) {
+      const dataUrl = await pickImage('gallery');
+      if (dataUrl) {
+        compressAndSetAvatar(dataUrl);
+      }
+      return;
+    }
     fileInputRef.current?.click();
   };
 
-  const handleMockCamera = () => {
+  const handleNativeCamera = async () => {
+    if (isNative()) {
+      const dataUrl = await pickImage('camera');
+      if (dataUrl) {
+        compressAndSetAvatar(dataUrl);
+      }
+      return;
+    }
+    // Web 兜底：随机头像
     const newSeed = Math.floor(Math.random() * 1000);
     const mockUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${newSeed}`;
     setAvatar(mockUrl);
     setShowActionSheet(false);
+  };
+
+  const compressAndSetAvatar = (dataUrl: string) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_SIZE = 400;
+      let width = img.width;
+      let height = img.height;
+      if (width > height) {
+        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+      } else {
+        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+      setAvatar(compressed.length > 500 * 1024 ? canvas.toDataURL('image/jpeg', 0.4) : compressed);
+      setShowActionSheet(false);
+    };
+    img.src = dataUrl;
   };
 
   return (
@@ -221,8 +261,8 @@ export default function EditProfile() {
                   <span className="font-bold text-sm text-on-surface">从相册选择</span>
                 </button>
 
-                <button 
-                  onClick={handleMockCamera}
+                <button
+                  onClick={handleNativeCamera}
                   className="flex flex-col items-center gap-3 p-6 bg-white rounded-[32px] border border-outline-variant/30 active:scale-95 transition-transform"
                 >
                   <div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center">

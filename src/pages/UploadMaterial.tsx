@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, Upload, Sparkles, X, Pencil, Check, Maximize2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Cropper from 'react-easy-crop';
+import { isNative } from "../utils/platform";
+import { pickImage } from "../services/cameraService";
 
 export default function UploadMaterial() {
   const navigate = useNavigate();
@@ -190,8 +192,15 @@ export default function UploadMaterial() {
                 </button>
               </motion.div>
             ) : (
-              <button 
-                onClick={() => fileInputRef.current?.click()}
+              <button
+                onClick={async () => {
+                  if (isNative()) {
+                    const dataUrl = await pickImage('gallery');
+                    if (dataUrl) setImageToCrop(dataUrl);
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className="w-full h-full rounded-[40px] border-4 border-dashed border-outline-variant/30 bg-white flex flex-col items-center justify-center gap-4 active:scale-[0.98] transition-all group"
               >
                 <div className="w-20 h-20 bg-primary/5 rounded-full flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
